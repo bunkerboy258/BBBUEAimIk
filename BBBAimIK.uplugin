@@ -1,0 +1,24 @@
+﻿{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "BBBAimIK",
+	"Description": "CCD-style AimIK solver inspired by RootMotion FinalIK. Pose-native aim source with bone chain rotation.",
+	"Category": "Animation",
+	"CreatedBy": "bunkerboy",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "BBBAimIK",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

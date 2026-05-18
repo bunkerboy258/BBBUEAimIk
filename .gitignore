@@ -1,0 +1,13 @@
+# Build artifacts
+Binaries/
+Intermediate/
+Saved/
+
+# IDE
+.vs/
+.vscode/
+*.sln
+
+# OS
+.DS_Store
+Thumbs.db
