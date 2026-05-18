@@ -1,6 +1,5 @@
 ﻿#include "AnimGraphNode_AimIK.h"
 
-#if WITH_EDITOR
 #include "Animation/AnimBlueprint.h"
 
 #define LOCTEXT_NAMESPACE "AimIKAnimNode"
@@ -108,4 +107,3 @@ void UAnimGraphNode_AimIK::CreateOutputPins()
 }
 
 #undef LOCTEXT_NAMESPACE
-#endif // WITH_EDITOR
