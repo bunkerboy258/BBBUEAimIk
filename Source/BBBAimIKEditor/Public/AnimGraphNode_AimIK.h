@@ -6,7 +6,7 @@
 #include "AnimGraphNode_AimIK.generated.h"
 
 UCLASS()
-class BBBAIMIK_API UAnimGraphNode_AimIK : public UAnimGraphNode_SkeletalControlBase
+class BBBAIMIKEDITOR_API UAnimGraphNode_AimIK : public UAnimGraphNode_SkeletalControlBase
 {
     GENERATED_BODY()
 
