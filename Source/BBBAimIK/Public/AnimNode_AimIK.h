@@ -81,6 +81,12 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver", meta = (PinShownByDefault))
     bool bHasValidAimTarget = false;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Safety")
+    bool bEnableMinTargetDistanceGuard = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Safety", meta = (ClampMin = "0.0"))
+    float MinTargetDistance = 30.0f;
+
     // Debug logging toggle. Uses UE_LOG inside EvaluateSkeletalControl_AnyThread.
     // Avoid enabling in production; logging inside the anim evaluation loop has overhead.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
