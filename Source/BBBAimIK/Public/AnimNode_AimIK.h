@@ -31,24 +31,24 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
 {
     GENERATED_BODY()
 
-    // === Bone Chain (spine hierarchy, root to tip) with per-bone weights ===
+    // === 骨骼链（脊柱层级，从根到尖端），带每骨骼权重 ===
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BoneChain")
     TArray<FAimIKBoneRef> BoneChain;
 
-    // Bone that carries the virtual aim source. Equivalent to FinalIK's transform parent.
+    // 承载虚拟瞄准源的骨骼。等价于 FinalIK 的变换父级。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim")
     FName AimSourceBoneName;
 
-    // Local transform of the aim source relative to AimSourceBoneName.
-    // Must be a stable binding relationship, not a per-frame external snapshot.
+    // 瞄准源相对于 AimSourceBoneName 的局部变换。
+    // 必须是稳定的绑定关系，而不是每帧的外部快照。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim", meta = (PinShownByDefault))
     FTransform AimSourceLocalTransform = FTransform::Identity;
 
-    // Local axis on the aim source that should point to target (default: X+).
+    // 瞄准源上应指向目标的局部轴（默认：X+）。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim")
     FVector AimAxis = FVector::ForwardVector;
 
-    // === Pole (prevents body from flipping) ===
+    // === 极轴（防止身体翻转）===
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pole")
     FVector PoleAxis = FVector::UpVector;
 
@@ -58,26 +58,26 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pole", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float PoleWeight = 0.0f;
 
-    // === Clamp (prevents 180-degree singularity jump) ===
+    // === 钳制（防止 180 度奇点跳变）===
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clamp", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float ClampWeight = 0.1f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clamp", meta = (ClampMin = "0", ClampMax = "2"))
     int32 ClampSmoothing = 2;
 
-    // === Solver Settings ===
+    // === 求解器设置 ===
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver", meta = (ClampMin = "1"))
     int32 MaxIterations = 4;
 
-    // Minimum angular error (degrees) to stop iterating early. 0 = always iterate MaxIterations.
+    // 提前停止迭代的最小角度误差（度）。0 = 始终迭代 MaxIterations。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver", meta = (ClampMin = "0.0"))
     float Tolerance = 0.0f;
 
-    // Target position in component space.
+    // 组件空间中的目标位置。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver", meta = (PinShownByDefault))
     FVector AimTarget = FVector::ZeroVector;
 
-    // Explicit validity flag. Zero is a valid component-space target.
+    // 显式有效标志。零是有效的组件空间目标。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver", meta = (PinShownByDefault))
     bool bHasValidAimTarget = false;
 
@@ -87,12 +87,12 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Safety", meta = (ClampMin = "0.0"))
     float MinTargetDistance = 30.0f;
 
-    // Debug logging toggle. Uses UE_LOG inside EvaluateSkeletalControl_AnyThread.
-    // Avoid enabling in production; logging inside the anim evaluation loop has overhead.
+    // 调试日志开关。在 EvaluateSkeletalControl_AnyThread 中使用 UE_LOG。
+    // 避免在生产环境中启用；在动画评估循环中记录日志有性能开销。
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
     bool bEnableDebugLogging = false;
 
-    // === FAnimNode_SkeletalControlBase Interface ===
+    // === FAnimNode_SkeletalControlBase 接口 ===
     virtual void InitializeBoneReferences(const FBoneContainer& RequiredBones) override;
     virtual void CacheBones_AnyThread(const FAnimationCacheBonesContext& Context) override;
     virtual void EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext& Output, TArray<FBoneTransform>& OutBoneTransforms) override;
@@ -104,16 +104,16 @@ private:
     bool bCachedBonesValid = false;
     bool bAimSourceIsChainDescendant = false;
 
-    // Core solver
+    // 核心求解器
     void SolveAimIK(FComponentSpacePoseContext& Output, TArray<FBoneTransform>& OutBoneTransforms);
     
-    // Clamp target to avoid 180-degree singularity
+    // 钳制目标以避免 180 度奇点
     FVector GetClampedTargetCS(const FVector& AimBonePosCS, const FVector& AimBoneForwardCS, const FVector& TargetCS) const;
     
-    // Offset target when it lies on the chain extension line (linear singularity).
+    // 当目标位于链延伸线上时进行偏移（线性奇点）。
     FVector GetSingularityOffset(const FVector& FirstBonePosCS, const FVector& AimPosCS, const FVector& TargetPosCS) const;
     
-    // Rotate one chain link and propagate that delta through downstream links and the aim transform.
+    // 旋转一个链节，并将该增量传播到下游链节和瞄准变换。
     void RotateBoneToTarget(
         int32 ChainIndex,
         const FVector& TargetPosCS,

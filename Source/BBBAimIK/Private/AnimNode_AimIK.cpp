@@ -11,13 +11,9 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
 	{
 		const int32 SkeletonIndex = RequiredBones.GetPoseBoneIndexForBoneName(BoneRef.BoneName);
 		if (SkeletonIndex != INDEX_NONE)
-		{
-			CachedBoneIndices.Add(RequiredBones.GetCompactPoseIndexFromSkeletonIndex(SkeletonIndex).GetInt());
-		}
+		{CachedBoneIndices.Add(RequiredBones.GetCompactPoseIndexFromSkeletonIndex(SkeletonIndex).GetInt());}
 		else
-		{
-			CachedBoneIndices.Add(INDEX_NONE);
-		}
+		{CachedBoneIndices.Add(INDEX_NONE);}
 	}
 
 	bCachedBonesValid = CachedBoneIndices.Num() > 0;
@@ -32,9 +28,7 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
 
 	const int32 AimSourceSkeletonIndex = RequiredBones.GetPoseBoneIndexForBoneName(AimSourceBoneName);
 	if (AimSourceSkeletonIndex != INDEX_NONE)
-	{
-		AimSourceBoneIndex = RequiredBones.GetCompactPoseIndexFromSkeletonIndex(AimSourceSkeletonIndex).GetInt();
-	}
+	{AimSourceBoneIndex = RequiredBones.GetCompactPoseIndexFromSkeletonIndex(AimSourceSkeletonIndex).GetInt();}
 	else
 	{
 		AimSourceBoneIndex = INDEX_NONE;
@@ -63,21 +57,13 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
 	}
 
 	if (!bAimSourceIsChainDescendant)
-	{
-		bCachedBonesValid = false;
-	}
+	{bCachedBonesValid = false;}
 }
 
 void FAnimNode_AimIK::CacheBones_AnyThread(const FAnimationCacheBonesContext& Context)
-{
-	Super::CacheBones_AnyThread(Context);
-}
-
+{Super::CacheBones_AnyThread(Context);}
 bool FAnimNode_AimIK::IsValidToEvaluate(const USkeleton* Skeleton, const FBoneContainer& RequiredBones)
-{
-	return bCachedBonesValid && AimSourceBoneIndex != INDEX_NONE && bAimSourceIsChainDescendant;
-}
-
+{return bCachedBonesValid && AimSourceBoneIndex != INDEX_NONE && bAimSourceIsChainDescendant;}
 void FAnimNode_AimIK::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext& Output, TArray<FBoneTransform>& OutBoneTransforms)
 {
 	check(OutBoneTransforms.Num() == 0);
@@ -89,10 +75,7 @@ void FAnimNode_AimIK::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseConte
 		!bHasValidAimTarget ||
 		!AimSourceLocalTransform.IsValid() ||
 		AimAxis.IsNearlyZero())
-	{
-		return;
-	}
-
+	{return;}
 	SolveAimIK(Output, OutBoneTransforms);
 }
 
@@ -101,10 +84,7 @@ void FAnimNode_AimIK::SolveAimIK(FComponentSpacePoseContext& Output, TArray<FBon
 	// 获取 IK 骨骼链上的骨骼节点数量
 	const int32 ChainCount = CachedBoneIndices.Num();
 	if (ChainCount == 0) 
-	{
-		return;
-	}
-
+	{return;}
 	// 提前准备一个数组，存各骨骼的组件空间Transform
 	TArray<FTransform> ChainTransformsCS;
 	ChainTransformsCS.Reserve(ChainCount);
@@ -122,17 +102,11 @@ void FAnimNode_AimIK::SolveAimIK(FComponentSpacePoseContext& Output, TArray<FBon
 	// 获取初始的瞄准位置
 	const FVector InitialAimPosCS = CurrentAimTransformCS.GetLocation();
 	if (bEnableMinTargetDistanceGuard && FVector::Dist(InitialAimPosCS, AimTarget) <= MinTargetDistance)
-	{
-		return;
-	}
-
+	{return;}
 	// 提取瞄准前向轴（根据 AimAxis 指定），并转换为组件空间的方向向量
 	const FVector InitialAimForwardCS = CurrentAimTransformCS.TransformVectorNoScale(AimAxis).GetSafeNormal();
 	if (InitialAimForwardCS.IsNearlyZero()) // 如果方向异常（接近零向量），则取消计算
-	{
-		return;
-	}
-
+	{return;}
 	// 通过时间和周期判断是否需要输出调试日志，避免日志刷屏
 	const bool bShouldLogSolve = bEnableDebugLogging && ((FPlatformTime::Cycles64() % 60) == 0);
 	if (bShouldLogSolve)
@@ -141,9 +115,7 @@ void FAnimNode_AimIK::SolveAimIK(FComponentSpacePoseContext& Output, TArray<FBon
 		for (int32 BoneIdx = 0; BoneIdx < BoneChain.Num(); ++BoneIdx)
 		{
 			if (!ChainDescription.IsEmpty())
-			{
-				ChainDescription += TEXT(" -> ");
-			}
+			{ChainDescription += TEXT(" -> ");}
 			ChainDescription += FString::Printf(TEXT("%s(%.2f)"), *BoneChain[BoneIdx].BoneName.ToString(), BoneChain[BoneIdx].Weight);
 		}
 
@@ -279,10 +251,7 @@ FVector FAnimNode_AimIK::GetSingularityOffset(const FVector& FirstBonePosCS, con
 	// 浮点比较：Cos接近1表示夹角接近0度，也就是三个点（骨链起点、瞄准起始点、目标点）几乎连成一条直线了。
 	// 如果 Dot < 0.999f (也就是说没有趋近于完全水平共线)，就不属于"奇点"（即骨链不会打死结），直接退出。
 	if (Dot < 0.999f)
-	{
-		return FVector::ZeroVector;
-	}
-
+	{return FVector::ZeroVector;}
 	// UE专属API：.GetSafeNormal() 也是 FVector 的方法，它会将向量安全地归一化（转成长度1的方向向量），内部自带了防除零保护。
 	const FVector IKDirection = ToTarget.GetSafeNormal();
 
@@ -302,9 +271,7 @@ FVector FAnimNode_AimIK::GetSingularityOffset(const FVector& FirstBonePosCS, con
 FVector FAnimNode_AimIK::GetClampedTargetCS(const FVector& AimBonePosCS, const FVector& AimBoneForwardCS, const FVector& TargetCS) const
 {
 	if (ClampWeight <= KINDA_SMALL_NUMBER)
-	{
-		return TargetCS;
-	}
+	{return TargetCS;}
 	if (ClampWeight >= 1.0f - KINDA_SMALL_NUMBER)
 	{
 		const float Dist = FVector::Dist(AimBonePosCS, TargetCS);
@@ -314,36 +281,21 @@ FVector FAnimNode_AimIK::GetClampedTargetCS(const FVector& AimBonePosCS, const F
 	const FVector ToTarget = TargetCS - AimBonePosCS;
 	const float TargetDist = ToTarget.Size();
 	if (TargetDist < KINDA_SMALL_NUMBER)
-	{
-		return TargetCS;
-	}
-
+	{return TargetCS;}
 	const FVector ToTargetDir = ToTarget / TargetDist;
 	const float AngleDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(AimBoneForwardCS, ToTargetDir), -1.0f, 1.0f)));
 	const float NormalizedAngle = 1.0f - (AngleDeg / 180.0f);
 	const float OneMinusNormalizedAngle = 1.0f - NormalizedAngle;
 	if (OneMinusNormalizedAngle <= KINDA_SMALL_NUMBER)
-	{
-		return TargetCS;
-	}
-
+	{return TargetCS;}
 	float TargetClampMlp = 1.0f;
 	if (ClampWeight > KINDA_SMALL_NUMBER)
-	{
-		TargetClampMlp = FMath::Clamp(1.0f - ((ClampWeight - NormalizedAngle) / OneMinusNormalizedAngle), 0.0f, 1.0f);
-	}
-
+	{TargetClampMlp = FMath::Clamp(1.0f - ((ClampWeight - NormalizedAngle) / OneMinusNormalizedAngle), 0.0f, 1.0f);}
 	float ClampMlp = 1.0f;
 	if (ClampWeight > KINDA_SMALL_NUMBER)
-	{
-		ClampMlp = FMath::Clamp(NormalizedAngle / ClampWeight, 0.0f, 1.0f);
-	}
-
+	{ClampMlp = FMath::Clamp(NormalizedAngle / ClampWeight, 0.0f, 1.0f);}
 	for (int32 Index = 0; Index < ClampSmoothing; ++Index)
-	{
-		ClampMlp = FMath::Sin(ClampMlp * UE_PI * 0.5f);
-	}
-
+	{ClampMlp = FMath::Sin(ClampMlp * UE_PI * 0.5f);}
 	const FQuat RotQuat = FQuat::FindBetweenNormals(AimBoneForwardCS, ToTargetDir);
 	const FQuat SlerpedQuat = FQuat::Slerp(FQuat::Identity, RotQuat, ClampMlp * TargetClampMlp);
 	const FVector SlerpedDir = SlerpedQuat.RotateVector(AimBoneForwardCS);
@@ -361,10 +313,7 @@ void FAnimNode_AimIK::RotateBoneToTarget(
 	const FVector CurrentAimPosCS = InOutAimTransformCS.GetLocation();
 	const FVector CurrentAimForwardCS = InOutAimTransformCS.TransformVectorNoScale(AimAxis).GetSafeNormal();
 	if (CurrentAimForwardCS.IsNearlyZero())
-	{
-		return;
-	}
-
+	{return;}
 	if (bEnableDebugLogging && ((FPlatformTime::Cycles64() % 60) == 0))
 	{
 		UE_LOG(LogAnimation, Warning, TEXT("[AimIK] RotateBoneToTarget CurrentAimPosCS=%s CurrentAimForwardCS=%s TargetPosCS=%s Weight=%.3f"),
@@ -376,10 +325,7 @@ void FAnimNode_AimIK::RotateBoneToTarget(
 
 	const FVector ToTargetDir = (TargetPosCS - CurrentAimPosCS).GetSafeNormal();
 	if (ToTargetDir.IsNearlyZero())
-	{
-		return;
-	}
-
+	{return;}
 	const FQuat SwingRot = FQuat::FindBetweenNormals(CurrentAimForwardCS, ToTargetDir);
 	const FQuat AppliedSwingRot = Weight >= 1.0f - KINDA_SMALL_NUMBER
 		? SwingRot
@@ -401,10 +347,7 @@ void FAnimNode_AimIK::RotateBoneToTarget(
 
 	const FQuat TotalRot = AppliedPoleRot * AppliedSwingRot;
 	if (TotalRot.IsIdentity())
-	{
-		return;
-	}
-
+	{return;}
 	const FVector BonePos = BoneCS.GetLocation();
 	for (int32 DownstreamIndex = ChainIndex; DownstreamIndex < InOutChainTransforms.Num(); ++DownstreamIndex)
 	{

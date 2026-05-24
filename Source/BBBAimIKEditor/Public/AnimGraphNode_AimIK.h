@@ -14,10 +14,10 @@ public:
     UPROPERTY(EditAnywhere, Category = Settings)
     FAnimNode_AimIK Node;
 
-    // UAnimGraphNode_SkeletalControlBase interface
+    // UAnimGraphNode_SkeletalControlBase 接口
     virtual const FAnimNode_SkeletalControlBase* GetNode() const override { return &Node; }
 
-    // UEdGraphNode interface
+    // UEdGraphNode 接口
     virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
     virtual FText GetTooltipText() const override;
     virtual FText GetMenuCategory() const override;
