@@ -6,14 +6,34 @@
 
 void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBones)
 {
+	const USkeleton* SkeletonAsset = RequiredBones.GetSkeletonAsset();
+	if (!SkeletonAsset)
+	{
+		CachedBoneIndices.Reset();
+		AimSourceBoneIndex = INDEX_NONE;
+		bCachedBonesValid = false;
+		bAimSourceIsChainDescendant = false;
+		if (bEnableDebugLogging)
+		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Init] Invalid skeleton asset."));}
+		return;
+	}
+
+	const FReferenceSkeleton& ReferenceSkeleton = SkeletonAsset->GetReferenceSkeleton();
 	CachedBoneIndices.Reset(BoneChain.Num());
 	for (const FAimIKBoneRef& BoneRef : BoneChain)
 	{
-		const int32 SkeletonIndex = RequiredBones.GetPoseBoneIndexForBoneName(BoneRef.BoneName);
-		if (SkeletonIndex != INDEX_NONE)
-		{CachedBoneIndices.Add(RequiredBones.GetCompactPoseIndexFromSkeletonIndex(SkeletonIndex).GetInt());}
+		const int32 SkeletonIndex = ReferenceSkeleton.FindBoneIndex(BoneRef.BoneName);
+		const FCompactPoseBoneIndex CompactPoseIndex = SkeletonIndex != INDEX_NONE
+			? RequiredBones.GetCompactPoseIndexFromSkeletonIndex(SkeletonIndex)
+			: FCompactPoseBoneIndex(INDEX_NONE);
+		if (CompactPoseIndex.GetInt() != INDEX_NONE)
+		{CachedBoneIndices.Add(CompactPoseIndex.GetInt());}
 		else
-		{CachedBoneIndices.Add(INDEX_NONE);}
+		{
+			CachedBoneIndices.Add(INDEX_NONE);
+			if (bEnableDebugLogging)
+			{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Init] Bone unavailable for current skeleton/required bones: %s RefSkeletonIndex=%d"), *BoneRef.BoneName.ToString(), SkeletonIndex);}
+		}
 	}
 
 	bCachedBonesValid = CachedBoneIndices.Num() > 0;
@@ -26,23 +46,41 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
 		}
 	}
 
-	const int32 AimSourceSkeletonIndex = RequiredBones.GetPoseBoneIndexForBoneName(AimSourceBoneName);
-	if (AimSourceSkeletonIndex != INDEX_NONE)
-	{AimSourceBoneIndex = RequiredBones.GetCompactPoseIndexFromSkeletonIndex(AimSourceSkeletonIndex).GetInt();}
+	const int32 AimSourceSkeletonIndex = ReferenceSkeleton.FindBoneIndex(AimSourceBoneName);
+	const FCompactPoseBoneIndex AimSourceCompactPoseIndex = AimSourceSkeletonIndex != INDEX_NONE
+		? RequiredBones.GetCompactPoseIndexFromSkeletonIndex(AimSourceSkeletonIndex)
+		: FCompactPoseBoneIndex(INDEX_NONE);
+	if (AimSourceCompactPoseIndex.GetInt() != INDEX_NONE)
+	{AimSourceBoneIndex = AimSourceCompactPoseIndex.GetInt();}
 	else
 	{
 		AimSourceBoneIndex = INDEX_NONE;
 		bCachedBonesValid = false;
+		if (bEnableDebugLogging)
+		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Init] AimSourceBone unavailable for current skeleton/required bones: %s RefSkeletonIndex=%d"), *AimSourceBoneName.ToString(), AimSourceSkeletonIndex);}
 	}
 
 	bAimSourceIsChainDescendant = false;
 	if (bCachedBonesValid && AimSourceSkeletonIndex != INDEX_NONE)
 	{
-		const int32 ChainTipSkeletonIndex = RequiredBones.GetPoseBoneIndexForBoneName(BoneChain.Last().BoneName);
+		const int32 ChainTipSkeletonIndex = ReferenceSkeleton.FindBoneIndex(BoneChain.Last().BoneName);
 		if (ChainTipSkeletonIndex != INDEX_NONE)
 		{
 			int32 CurrentSkeletonIndex = AimSourceSkeletonIndex;
-			const FReferenceSkeleton& ReferenceSkeleton = RequiredBones.GetSkeletonAsset()->GetReferenceSkeleton();
+			if (bEnableDebugLogging)
+			{
+				FString ParentChain;
+				int32 TraceIdx = AimSourceSkeletonIndex;
+				while (TraceIdx != INDEX_NONE)
+				{
+					FName TraceName = ReferenceSkeleton.GetBoneName(TraceIdx);
+					if (!ParentChain.IsEmpty()) {ParentChain += TEXT(" -> ");}
+					ParentChain += FString::Printf(TEXT("%s[%d]"), *TraceName.ToString(), TraceIdx);
+					TraceIdx = ReferenceSkeleton.GetParentIndex(TraceIdx);
+				}
+				UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Init] AimSourceBone '%s' parent chain: %s"), *AimSourceBoneName.ToString(), *ParentChain);
+				UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Init] ChainTip '%s' RefSkeletonIndex=%d"), *BoneChain.Last().BoneName.ToString(), ChainTipSkeletonIndex);
+			}
 			while (CurrentSkeletonIndex != INDEX_NONE)
 			{
 				if (CurrentSkeletonIndex == ChainTipSkeletonIndex)
@@ -50,14 +88,30 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
 					bAimSourceIsChainDescendant = true;
 					break;
 				}
-
 				CurrentSkeletonIndex = ReferenceSkeleton.GetParentIndex(CurrentSkeletonIndex);
 			}
 		}
 	}
 
 	if (!bAimSourceIsChainDescendant)
-	{bCachedBonesValid = false;}
+	{
+		bCachedBonesValid = false;
+		if (bEnableDebugLogging)
+		{
+			UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Init] AimSourceBone '%s' is NOT a descendant of ChainTip '%s'. Skeleton mismatch or wrong chain order."),
+				*AimSourceBoneName.ToString(),
+				BoneChain.Num() > 0 ? *BoneChain.Last().BoneName.ToString() : TEXT("(empty chain)"));
+		}
+	}
+
+	if (bEnableDebugLogging)
+	{
+		UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Init] Result: bCachedBonesValid=%s, AimSourceRefSkeletonIndex=%d, AimSourceCompactPoseIndex=%d, bAimSourceIsChainDescendant=%s"),
+			bCachedBonesValid ? TEXT("true") : TEXT("false"),
+			AimSourceSkeletonIndex,
+			AimSourceBoneIndex,
+			bAimSourceIsChainDescendant ? TEXT("true") : TEXT("false"));
+	}
 }
 
 void FAnimNode_AimIK::CacheBones_AnyThread(const FAnimationCacheBonesContext& Context)
@@ -68,14 +122,48 @@ void FAnimNode_AimIK::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseConte
 {
 	check(OutBoneTransforms.Num() == 0);
 
-	if (!bCachedBonesValid ||
-		AimSourceBoneIndex == INDEX_NONE ||
-		!bAimSourceIsChainDescendant ||
-		MaxIterations <= 0 ||
-		!bHasValidAimTarget ||
-		!AimSourceLocalTransform.IsValid() ||
-		AimAxis.IsNearlyZero())
-	{return;}
+	if (!bCachedBonesValid)
+	{
+		if (bEnableDebugLogging)
+		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Eval] Early exit: bCachedBonesValid=false (check BoneChain names & AimSourceBoneName)"));}
+		return;
+	}
+	if (AimSourceBoneIndex == INDEX_NONE)
+	{
+		if (bEnableDebugLogging)
+		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Eval] Early exit: AimSourceBoneIndex=INDEX_NONE"));}
+		return;
+	}
+	if (!bAimSourceIsChainDescendant)
+	{
+		if (bEnableDebugLogging)
+		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Eval] Early exit: bAimSourceIsChainDescendant=false"));}
+		return;
+	}
+	if (MaxIterations <= 0)
+	{
+		if (bEnableDebugLogging)
+		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Eval] Early exit: MaxIterations=%d"), MaxIterations);}
+		return;
+	}
+	if (!bHasValidAimTarget)
+	{
+		if (bEnableDebugLogging)
+		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Eval] Early exit: bHasValidAimTarget=false"));}
+		return;
+	}
+	if (!AimSourceLocalTransform.IsValid())
+	{
+		if (bEnableDebugLogging)
+		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Eval] Early exit: AimSourceLocalTransform invalid"));}
+		return;
+	}
+	if (AimAxis.IsNearlyZero())
+	{
+		if (bEnableDebugLogging)
+		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Eval] Early exit: AimAxis is zero"));}
+		return;
+	}
 	SolveAimIK(Output, OutBoneTransforms);
 }
 
@@ -108,7 +196,8 @@ void FAnimNode_AimIK::SolveAimIK(FComponentSpacePoseContext& Output, TArray<FBon
 	if (InitialAimForwardCS.IsNearlyZero()) // 如果方向异常（接近零向量），则取消计算
 	{return;}
 	// 通过时间和周期判断是否需要输出调试日志，避免日志刷屏
-	const bool bShouldLogSolve = bEnableDebugLogging && ((FPlatformTime::Cycles64() % 60) == 0);
+	const uint64 DebugInterval = static_cast<uint64>(FMath::Max(DebugSolveLogInterval, 1));
+	const bool bShouldLogSolve = bEnableDebugLogging && ((FPlatformTime::Cycles64() % DebugInterval) == 0);
 	if (bShouldLogSolve)
 	{
 		FString ChainDescription;
@@ -314,7 +403,8 @@ void FAnimNode_AimIK::RotateBoneToTarget(
 	const FVector CurrentAimForwardCS = InOutAimTransformCS.TransformVectorNoScale(AimAxis).GetSafeNormal();
 	if (CurrentAimForwardCS.IsNearlyZero())
 	{return;}
-	if (bEnableDebugLogging && ((FPlatformTime::Cycles64() % 60) == 0))
+	const uint64 DebugInterval = static_cast<uint64>(FMath::Max(DebugSolveLogInterval, 1));
+	if (bEnableDebugLogging && ((FPlatformTime::Cycles64() % DebugInterval) == 0))
 	{
 		UE_LOG(LogAnimation, Warning, TEXT("[AimIK] RotateBoneToTarget CurrentAimPosCS=%s CurrentAimForwardCS=%s TargetPosCS=%s Weight=%.3f"),
 			*CurrentAimPosCS.ToString(),

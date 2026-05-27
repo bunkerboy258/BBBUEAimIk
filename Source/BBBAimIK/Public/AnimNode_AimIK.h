@@ -92,6 +92,10 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
     bool bEnableDebugLogging = false;
 
+    // 求解阶段日志采样间隔，避免 Debug 开启时逐帧刷屏。
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (ClampMin = "1"))
+    int32 DebugSolveLogInterval = 60;
+
     // === FAnimNode_SkeletalControlBase 接口 ===
     virtual void InitializeBoneReferences(const FBoneContainer& RequiredBones) override;
     virtual void CacheBones_AnyThread(const FAnimationCacheBonesContext& Context) override;
