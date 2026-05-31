@@ -1,6 +1,6 @@
 # BBBAimIK
 
-A standalone Unreal Engine 5.6+ plugin providing a **CCD-style AimIK solver** inspired by RootMotion FinalIK's `IKSolverAim`.
+A standalone Unreal Engine 5.6+ plugin providing a **CCD-style AimIK solver** for skeletal mesh aiming.
 
 Rotates a configurable bone chain so that a **pose-local aim source** (e.g. a virtual muzzle attached to `hand_r`) points toward a target in component space. No external per-frame transform feedback — the aim source is reconstructed entirely from the current skeletal pose.
 
@@ -29,8 +29,7 @@ The solver works in **Component Space** and operates on a user-defined bone chai
 ### Why not just use Control Rig?
 
 Control Rig is powerful but heavy for simple upper-body aiming. BBBAimIK gives you:
-- A lightweight, data-driven AnimNode with minimal overhead
-- Direct FinalIK-inspired semantics (`BoneChain` + `AimSource` + `Target`)
+- A lightweight data-driven AnimNode with minimal overhead
 - Per-bone weighting for artistic control
 - No additional asset dependencies beyond the AnimBlueprint
 
@@ -40,27 +39,72 @@ Control Rig is powerful but heavy for simple upper-body aiming. BBBAimIK gives y
 
 ### CCD (Cyclic Coordinate Descent) Chain Solver
 
+BBBAimIK 使用 CCD 迭代算法逐步调整骨骼链 使瞄准源对准目标。核心流程如下：
+
 ```
-For each iteration:
-    For each bone in BoneChain (root → tip):
-        1. Compute current aim forward in ComponentSpace
-        2. Compute desired direction (target - aim position)
-        3. Find rotation that aligns forward → desired
-        4. Apply rotation with bone weight and Alpha blending
-        5. Propagate rotation to all downstream bones
-        6. Update aim source transform for next bone
+对于每一次迭代：
+    对于 BoneChain 中的每根骨骼（从根到末端）：
+        1. 在当前 Pose 中重建瞄准源的 ComponentSpace 变换
+        2. 计算当前瞄准方向（AimSource 前向向量）
+        3. 计算期望方向（目标位置 - 瞄准源位置）
+        4. 求出使当前方向对齐到期望方向的最小旋转
+        5. 将该旋转乘以骨骼权重和 Alpha 混合系数后应用到当前骨骼
+        6. 将旋转传播到该骨骼的所有下游子骨骼
+        7. 更新瞄准源变换 供下一根骨骼使用
 ```
+
+#### 详细求解步骤
+
+**Step 1 — 重建瞄准源变换**
+
+CCD 不是基于外部传入的实时世界坐标 而是从当前 Pose 内部重建：
+
+```cpp
+FTransform AimSourceBoneCS = Output.Pose.GetComponentSpaceTransform(AimSourceBoneIndex);
+FTransform CurrentAimTransformCS = AimSourceLocalTransform * AimSourceBoneCS;
+```
+
+- `AimSourceBoneCS`：AimSource 所在骨骼在当前 Pose 中的 ComponentSpace 变换
+- `AimSourceLocalTransform`：装备时缓存的局部偏移（如枪口相对 `hand_r` 的绑定关系）
+- `CurrentAimTransformCS`：重建后的瞄准源 ComponentSpace 变换
+
+**Step 2 — 计算旋转差**
+
+```cpp
+FVector CurrentForward = CurrentAimTransformCS.TransformVectorNoScale(AimAxis);
+FVector DesiredForward = (AimTarget - CurrentAimTransformCS.GetLocation()).GetSafeNormal();
+FQuat DeltaRotation = FQuat::FindBetweenNormals(CurrentForward, DesiredForward);
+```
+
+- `CurrentForward`：当前瞄准方向
+- `DesiredForward`：期望瞄准方向（目标位置 - 瞄准源位置 单位化）
+- `DeltaRotation`：将当前方向旋转到期望方向的最小四元数
+
+**Step 3 — 应用权重与混合**
+
+```cpp
+float EffectiveWeight = BoneRef.Weight * Alpha;
+FQuat BlendedRotation = FQuat::Slerp(FQuat::Identity, DeltaRotation, EffectiveWeight);
+```
+
+- `BoneRef.Weight`：该骨骼在 BoneChain 中配置的权重（艺术控制）
+- `Alpha`：全局混合系数（如瞄准状态插值）
+- `BlendedRotation`：权重限制后的旋转 避免单根骨骼转动过猛
+
+**Step 4 — 传播与迭代**
+
+将 `BlendedRotation` 应用到当前骨骼后 立即把旋转写入 Pose 并传播给所有子骨骼。下一根骨骼在**已被修改过的 Pose** 上继续求解。多次迭代后 整条骨骼链逐渐收敛到目标方向。
 
 ### Singularity Handling
 
-Two safeguards prevent instability:
+两个安全措施防止求解不稳定：
 
-1. **ClampWeight** — When the target is nearly 180° behind the aim direction, the solver smoothly clamps the effective target toward the current forward, preventing a violent body flip.
-2. **Singularity Offset** — When the target lies exactly on the bone-chain extension line (linear singularity), a small perpendicular offset is applied to give the solver a non-degenerate rotation axis.
+1. **ClampWeight** — 当目标几乎在瞄准方向正后方（接近 180°）时 求解器将有效目标平滑钳制到当前前向附近 防止躯干剧烈翻转。
+2. **Singularity Offset** — 当目标恰好落在骨骼链延长线上（线性奇异点）时 施加一个微小的垂直偏移 给求解器提供非退化的旋转轴。
 
 ### Pole Constraint (Optional)
 
-If `PoleWeight > 0`, the solver adds a secondary rotation that keeps a user-defined pole axis oriented toward a pole target. Useful for preventing the torso from rolling sideways during extreme vertical aiming.
+当 `PoleWeight > 0` 时 求解器叠加一个二级旋转 使用户定义的极轴朝向极目标。用于防止躯干在极端垂直瞄准时发生侧翻。
 
 ---
 
@@ -68,36 +112,36 @@ If `PoleWeight > 0`, the solver adds a secondary rotation that keeps a user-defi
 
 ### 1. Pose-Native Aim Source
 
-The aim source is **not** an external world transform pushed into the node every frame. Instead, it is reconstructed from the current pose:
+瞄准源**不是**每帧从外部推入的世界坐标。而是从当前 Pose 内部重建：
 
 ```cpp
 FTransform AimSourceBoneCS = Output.Pose.GetComponentSpaceTransform(AimSourceBoneIndex);
 FTransform CurrentAimTransformCS = AimSourceLocalTransform * AimSourceBoneCS;
 ```
 
-This eliminates the feedback loop that caused frame-to-frame oscillation in earlier implementations:
+这消除了早期实现中的帧间反馈振荡：
 
 ```
-Frame N:   IK rotates spine → muzzle moves
-Frame N+1: New muzzle position fed back as input → IK over-corrects
+第 N 帧：   IK 旋转脊柱 → 枪口位置移动
+第 N+1 帧：新的枪口位置作为输入反馈 → IK 过度修正
 ```
 
 ### 2. Stable Binding Transform
 
-`AimSourceLocalTransform` is a **stable binding relationship** (e.g. muzzle relative to `hand_r`). It should be computed **once** at equip time and never updated per frame.
+`AimSourceLocalTransform` 是一个**稳定的绑定关系**（如枪口相对 `hand_r` 的局部偏移）。应在装备时计算**一次** 之后不再每帧更新。
 
 ### 3. Single Runtime Module with Conditional Editor Macros
 
-Unlike many UE plugins that split `Runtime` and `Editor` modules, BBBAimIK keeps everything in one Runtime module:
+与许多拆分 Runtime 和 Editor 模块的 UE 插件不同 BBBAimIK 将所有内容保留在一个 Runtime 模块中：
 
-- `FAnimNode_AimIK` — always compiled
-- `UAnimGraphNode_AimIK` — wrapped in `#if WITH_EDITOR` / `#if WITH_EDITORONLY_DATA`
+- `FAnimNode_AimIK` — 始终编译
+- `UAnimGraphNode_AimIK` — 用 `#if WITH_EDITOR` / `#if WITH_EDITORONLY_DATA` 包裹
 
-This avoids the "Editor Only module" blueprint warning while keeping Shipping builds safe (editor code is stripped).
+这避免了 "Editor Only module" 蓝图警告 同时保证 Shipping 构建安全（编辑器代码被剥离）。
 
 ### 4. Descendant Validation
 
-At initialization, the solver walks the skeleton hierarchy to verify that `AimSourceBoneName` is a descendant of the chain tip bone. If not, evaluation is silently skipped. This hard constraint prevents misconfigured chains from producing garbage output.
+初始化时 求解器遍历骨骼层级 验证 `AimSourceBoneName` 是否为骨骼链末端骨骼的后代。若不是 则静默跳过求值。这一硬约束防止错误配置的骨骼链产生无效输出。
 
 ---
 
@@ -299,9 +343,3 @@ Source/BBBAimIK/
 - **Unreal Engine**: 5.6+
 - **Platforms**: All (runtime code is platform-agnostic; editor UI is Win64/macOS/Linux)
 - **Skeleton**: Any skeleton with a standard hierarchy. Bone names are user-configurable.
-
----
-
-## Credits
-
-Algorithm inspired by RootMotion FinalIK's `IKSolverAim`. Implemented as a native UE AnimNode for performance and pipeline compatibility.
