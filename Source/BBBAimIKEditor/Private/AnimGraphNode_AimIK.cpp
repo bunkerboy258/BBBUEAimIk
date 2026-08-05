@@ -55,6 +55,7 @@ void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
 {
     Super::ValidateAnimNodeDuringCompilation(ForSkeleton, MessageLog);
 
+    // 先做与骨架无关的基础配置检查
     if (Node.BoneChain.Num() == 0)
     {
         MessageLog.Warning(
@@ -79,6 +80,8 @@ void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
     }
 
     const FReferenceSkeleton& ReferenceSkeleton = ForSkeleton->GetReferenceSkeleton();
+
+    // 检查瞄准源骨骼是否存在于当前骨架
     const int32 AimSourceIndex = ReferenceSkeleton.FindBoneIndex(Node.AimSourceBoneName);
     if (!Node.AimSourceBoneName.IsNone() && AimSourceIndex == INDEX_NONE)
     {
@@ -88,6 +91,7 @@ void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
                 FText::FromName(Node.AimSourceBoneName)).ToString());
     }
 
+    // 逐节检查骨骼链配置是否都能在骨架中找到
     for (const FAimIKBoneRef& BoneReference : Node.BoneChain)
     {
         if (BoneReference.BoneName.IsNone())
@@ -108,11 +112,13 @@ void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
                 FText::FromName(BoneReference.BoneName)).ToString());
     }
 
+    // 骨骼链或瞄准源缺失时不做层级校验，前面的警告已覆盖
     if (Node.BoneChain.Num() == 0 || AimSourceIndex == INDEX_NONE)
     {
         return;
     }
 
+    // 瞄准源必须是链尖端或其后代，否则求解无法影响瞄准方向
     if (Node.HasValidAimSourceHierarchy(ReferenceSkeleton))
     {
         return;

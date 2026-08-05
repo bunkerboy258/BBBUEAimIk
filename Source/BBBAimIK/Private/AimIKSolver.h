@@ -17,15 +17,34 @@ struct FAimIKSolverInput
     {
     }
 
+    /** 骨骼链配置，按骨骼层级从根到尖端排列 */
     const TArray<FAimIKBoneRef>& BoneChain;
+
+    /** 瞄准源上应指向目标的局部轴 */
     FVector AimAxis = FVector::ForwardVector;
+
+    /** 目标的组件空间位置 */
     FVector AimTargetCS = FVector::ZeroVector;
+
+    /** 用于约束身体翻转的局部极轴 */
     FVector PoleAxis = FVector::UpVector;
+
+    /** 极轴目标的组件空间位置 */
     FVector PoleTargetCS = FVector::ZeroVector;
+
+    /** 极轴纠偏权重 */
     float PoleWeight = 0.0f;
+
+    /** 目标方向钳制强度 */
     float ClampWeight = 0.0f;
+
+    /** 钳制结果的平滑迭代次数 */
     int32 ClampSmoothing = 0;
+
+    /** CCD 最大迭代次数 */
     int32 MaxIterations = 1;
+
+    /** 提前停止迭代的最小角度误差，单位为度 */
     float Tolerance = 0.0f;
 };
 

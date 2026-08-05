@@ -12,6 +12,7 @@ bool FAimIKBoneHierarchy::IsDescendantOrSelf(
         return false;
     }
 
+    // 沿父链向上遍历，命中祖先索引即确认后代关系
     int32 CurrentIndex = DescendantIndex;
     while (CurrentIndex != INDEX_NONE)
     {
