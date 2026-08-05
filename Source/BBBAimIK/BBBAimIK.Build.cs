@@ -15,19 +15,5 @@ public class BBBAimIK : ModuleRules
             "AnimationCore"
         });
 
-        PrivateDependencyModuleNames.AddRange(new string[]
-        {
-            "Projects"
-        });
-
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "AnimGraph",
-                "BlueprintGraph",
-                "UnrealEd"
-            });
-        }
     }
 }

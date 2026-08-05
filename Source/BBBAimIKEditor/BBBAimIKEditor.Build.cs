@@ -11,7 +11,6 @@ public class BBBAimIKEditor : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "Projects",
             "BBBAimIK",
             "AnimGraph",
             "BlueprintGraph",

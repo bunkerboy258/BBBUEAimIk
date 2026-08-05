@@ -1,76 +1,130 @@
-﻿#include "AnimGraphNode_AimIK.h"
+#include "AnimGraphNode_AimIK.h"
 
-#include "Animation/AnimBlueprint.h"
+#include "Animation/Skeleton.h"
+#include "Kismet2/CompilerResultsLog.h"
 
 #define LOCTEXT_NAMESPACE "AimIKAnimNode"
 
 FText UAnimGraphNode_AimIK::GetNodeTitle(ENodeTitleType::Type TitleType) const
-{return LOCTEXT("NodeTitle", "Aim IK");}
+{
+    return LOCTEXT("NodeTitle", "Aim IK");
+}
+
+//------------------------------------------------------------------------------
+
 FText UAnimGraphNode_AimIK::GetTooltipText() const
-{return LOCTEXT("NodeTooltip", "Aim IK: Rotates a bone chain so the pose-local aim source points toward AimTarget.");}
+{
+    return LOCTEXT(
+        "NodeTooltip",
+        "Rotates a bone chain so the pose-local aim source points toward AimTarget.");
+}
+
+//------------------------------------------------------------------------------
+
 FText UAnimGraphNode_AimIK::GetMenuCategory() const
-{return LOCTEXT("NodeCategory", "BBB|IK");}
+{
+    return LOCTEXT("NodeCategory", "BBB|IK");
+}
+
+//------------------------------------------------------------------------------
+
 FLinearColor UAnimGraphNode_AimIK::GetNodeTitleColor() const
-{return FLinearColor(0.75f, 0.35f, 0.15f);}
+{
+    return FLinearColor(0.75f, 0.35f, 0.15f);
+}
+
+//------------------------------------------------------------------------------
+
 FText UAnimGraphNode_AimIK::GetControllerDescription() const
-{return LOCTEXT("ControllerDescription", "Aim IK");}
+{
+    return LOCTEXT("ControllerDescription", "Aim IK");
+}
+
+//------------------------------------------------------------------------------
+
 FString UAnimGraphNode_AimIK::GetNodeCategory() const
-{return TEXT("BBB IK");}
-void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(USkeleton* ForSkeleton, FCompilerResultsLog& MessageLog)
+{
+    return TEXT("BBB IK");
+}
+
+//------------------------------------------------------------------------------
+
+void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
+    USkeleton* ForSkeleton,
+    FCompilerResultsLog& MessageLog)
 {
     Super::ValidateAnimNodeDuringCompilation(ForSkeleton, MessageLog);
 
     if (Node.BoneChain.Num() == 0)
-    {MessageLog.Warning(*LOCTEXT("NoBones", "@@ - BoneChain is empty. AimIK will have no effect.").ToString());}
+    {
+        MessageLog.Warning(
+            *LOCTEXT("NoBones", "@@ - BoneChain is empty. AimIK will have no effect.").ToString());
+    }
+
     if (Node.AimAxis.IsNearlyZero())
-    {MessageLog.Warning(*LOCTEXT("NoAimAxis", "@@ - AimAxis is zero. AimIK will have no effect.").ToString());}
+    {
+        MessageLog.Warning(
+            *LOCTEXT("NoAimAxis", "@@ - AimAxis is zero. AimIK will have no effect.").ToString());
+    }
+
     if (Node.AimSourceBoneName.IsNone())
-    {MessageLog.Warning(*LOCTEXT("NoAimSourceBone", "@@ - AimSourceBoneName is not set. AimIK will have no effect.").ToString());}
-    else if (ForSkeleton && ForSkeleton->GetReferenceSkeleton().FindBoneIndex(Node.AimSourceBoneName) == INDEX_NONE)
-    {MessageLog.Warning(*FText::Format(LOCTEXT("MissingAimSourceBone", "@@ - AimSourceBone '{0}' not found in skeleton."), FText::FromName(Node.AimSourceBoneName)).ToString());}
-    for (const FAimIKBoneRef& BoneRef : Node.BoneChain)
     {
-        if (BoneRef.BoneName.IsNone())
-        {MessageLog.Warning(*LOCTEXT("EmptyBone", "@@ - BoneChain contains an empty bone reference.").ToString());}
-        else if (ForSkeleton && ForSkeleton->GetReferenceSkeleton().FindBoneIndex(BoneRef.BoneName) == INDEX_NONE)
-        {MessageLog.Warning(*FText::Format(LOCTEXT("MissingBone", "@@ - Bone '{0}' not found in skeleton."), FText::FromName(BoneRef.BoneName)).ToString());}
+        MessageLog.Warning(
+            *LOCTEXT("NoAimSourceBone", "@@ - AimSourceBoneName is not set. AimIK will have no effect.").ToString());
     }
 
-    if (ForSkeleton && Node.BoneChain.Num() > 0 && !Node.AimSourceBoneName.IsNone())
+    if (!ForSkeleton)
     {
-        const FReferenceSkeleton& RefSkeleton = ForSkeleton->GetReferenceSkeleton();
-        const int32 AimSourceIndex = RefSkeleton.FindBoneIndex(Node.AimSourceBoneName);
-        const int32 ChainTipIndex = RefSkeleton.FindBoneIndex(Node.BoneChain.Last().BoneName);
-        if (AimSourceIndex != INDEX_NONE && ChainTipIndex != INDEX_NONE)
+        return;
+    }
+
+    const FReferenceSkeleton& ReferenceSkeleton = ForSkeleton->GetReferenceSkeleton();
+    const int32 AimSourceIndex = ReferenceSkeleton.FindBoneIndex(Node.AimSourceBoneName);
+    if (!Node.AimSourceBoneName.IsNone() && AimSourceIndex == INDEX_NONE)
+    {
+        MessageLog.Warning(
+            *FText::Format(
+                LOCTEXT("MissingAimSourceBone", "@@ - AimSourceBone '{0}' was not found in the skeleton."),
+                FText::FromName(Node.AimSourceBoneName)).ToString());
+    }
+
+    for (const FAimIKBoneRef& BoneReference : Node.BoneChain)
+    {
+        if (BoneReference.BoneName.IsNone())
         {
-            bool bIsChainDescendant = false;
-            int32 CurrentIndex = AimSourceIndex;
-            while (CurrentIndex != INDEX_NONE)
-            {
-                if (CurrentIndex == ChainTipIndex)
-                {
-                    bIsChainDescendant = true;
-                    break;
-                }
-
-                CurrentIndex = RefSkeleton.GetParentIndex(CurrentIndex);
-            }
-
-            if (!bIsChainDescendant)
-            {
-                MessageLog.Warning(*FText::Format(
-                    LOCTEXT("AimSourceNotChainDescendant", "@@ - AimSourceBone '{0}' must be the chain tip or a descendant of chain tip '{1}'. AimIK will have no effect."),
-                    FText::FromName(Node.AimSourceBoneName),
-                    FText::FromName(Node.BoneChain.Last().BoneName)).ToString());
-            }
+            MessageLog.Warning(
+                *LOCTEXT("EmptyBone", "@@ - BoneChain contains an empty bone reference.").ToString());
+            continue;
         }
-    }
-}
 
-void UAnimGraphNode_AimIK::CreateOutputPins()
-{
-    Super::CreateOutputPins();
-    // 输出引脚由 AnimGraphNode_SkeletalControlBase 自动创建
+        if (ReferenceSkeleton.FindBoneIndex(BoneReference.BoneName) != INDEX_NONE)
+        {
+            continue;
+        }
+
+        MessageLog.Warning(
+            *FText::Format(
+                LOCTEXT("MissingBone", "@@ - Bone '{0}' was not found in the skeleton."),
+                FText::FromName(BoneReference.BoneName)).ToString());
+    }
+
+    if (Node.BoneChain.Num() == 0 || AimSourceIndex == INDEX_NONE)
+    {
+        return;
+    }
+
+    if (Node.HasValidAimSourceHierarchy(ReferenceSkeleton))
+    {
+        return;
+    }
+
+    MessageLog.Warning(
+        *FText::Format(
+            LOCTEXT(
+                "AimSourceNotChainDescendant",
+                "@@ - AimSourceBone '{0}' must be the chain tip or a descendant of chain tip '{1}'. AimIK will have no effect."),
+            FText::FromName(Node.AimSourceBoneName),
+            FText::FromName(Node.BoneChain.Last().BoneName)).ToString());
 }
 
 #undef LOCTEXT_NAMESPACE

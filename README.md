@@ -1,345 +1,204 @@
 # BBBAimIK
 
-A standalone Unreal Engine 5.6+ plugin providing a **CCD-style AimIK solver** for skeletal mesh aiming.
+BBBAimIK 是面向 Unreal Engine 5.6+ 的 Aim IK 插件。它提供一个组件空间动画蓝图节点，通过 CCD 迭代旋转指定骨骼链，使姿态中的局部瞄准源指向目标位置。
 
-Rotates a configurable bone chain so that a **pose-local aim source** (e.g. a virtual muzzle attached to `hand_r`) points toward a target in component space. No external per-frame transform feedback — the aim source is reconstructed entirely from the current skeletal pose.
+插件由两个模块组成：
 
----
+- `BBBAimIK`：运行时节点、骨骼缓存和求解器。
+- `BBBAimIKEditor`：动画蓝图节点外观与编译期校验，仅在未烘焙目标中加载。
 
-## Table of Contents
+## 设计边界
 
-- [Overview](#overview)
-- [Algorithm](#algorithm)
-- [Key Design Decisions](#key-design-decisions)
-- [Installation](#installation)
-- [AnimBlueprint Setup](#animblueprint-setup)
-- [Parameter Reference](#parameter-reference)
-- [Architecture](#architecture)
-- [File Structure](#file-structure)
-- [Compatibility](#compatibility)
+插件解决以下问题：
 
----
+- 按配置权重旋转脊柱、颈部或手臂骨骼链。
+- 从当前 Pose 和稳定局部绑定重建瞄准源。
+- 将组件空间目标转换为骨骼链旋转结果。
+- 通过目标钳制、线性奇点偏移和可选极轴约束减少翻转。
 
-## Overview
+插件不负责：
 
-**BBBAimIK** is a single-runtime-module plugin. It adds one AnimGraph node: **BBB|IK → Aim IK**.
+- 获取摄像机或武器的世界空间目标。
+- 每帧从场景组件反向读取求解后的枪口变换。
+- 将世界空间坐标自动转换成 Skeletal Mesh 组件空间。
 
-The solver works in **Component Space** and operates on a user-defined bone chain (typically the spine hierarchy). It iteratively rotates each bone so that a virtual aim source — defined by a bone reference plus a stable local transform — converges toward the target direction.
-
-### Why not just use Control Rig?
-
-Control Rig is powerful but heavy for simple upper-body aiming. BBBAimIK gives you:
-- A lightweight data-driven AnimNode with minimal overhead
-- Per-bone weighting for artistic control
-- No additional asset dependencies beyond the AnimBlueprint
-
----
-
-## Algorithm
-
-### CCD (Cyclic Coordinate Descent) Chain Solver
-
-BBBAimIK 使用 CCD 迭代算法逐步调整骨骼链 使瞄准源对准目标。核心流程如下：
-
-```
-对于每一次迭代：
-    对于 BoneChain 中的每根骨骼（从根到末端）：
-        1. 在当前 Pose 中重建瞄准源的 ComponentSpace 变换
-        2. 计算当前瞄准方向（AimSource 前向向量）
-        3. 计算期望方向（目标位置 - 瞄准源位置）
-        4. 求出使当前方向对齐到期望方向的最小旋转
-        5. 将该旋转乘以骨骼权重和 Alpha 混合系数后应用到当前骨骼
-        6. 将旋转传播到该骨骼的所有下游子骨骼
-        7. 更新瞄准源变换 供下一根骨骼使用
-```
-
-#### 详细求解步骤
-
-**Step 1 — 重建瞄准源变换**
-
-CCD 不是基于外部传入的实时世界坐标 而是从当前 Pose 内部重建：
-
-```cpp
-FTransform AimSourceBoneCS = Output.Pose.GetComponentSpaceTransform(AimSourceBoneIndex);
-FTransform CurrentAimTransformCS = AimSourceLocalTransform * AimSourceBoneCS;
-```
-
-- `AimSourceBoneCS`：AimSource 所在骨骼在当前 Pose 中的 ComponentSpace 变换
-- `AimSourceLocalTransform`：装备时缓存的局部偏移（如枪口相对 `hand_r` 的绑定关系）
-- `CurrentAimTransformCS`：重建后的瞄准源 ComponentSpace 变换
-
-**Step 2 — 计算旋转差**
-
-```cpp
-FVector CurrentForward = CurrentAimTransformCS.TransformVectorNoScale(AimAxis);
-FVector DesiredForward = (AimTarget - CurrentAimTransformCS.GetLocation()).GetSafeNormal();
-FQuat DeltaRotation = FQuat::FindBetweenNormals(CurrentForward, DesiredForward);
-```
-
-- `CurrentForward`：当前瞄准方向
-- `DesiredForward`：期望瞄准方向（目标位置 - 瞄准源位置 单位化）
-- `DeltaRotation`：将当前方向旋转到期望方向的最小四元数
-
-**Step 3 — 应用权重与混合**
-
-```cpp
-float EffectiveWeight = BoneRef.Weight * Alpha;
-FQuat BlendedRotation = FQuat::Slerp(FQuat::Identity, DeltaRotation, EffectiveWeight);
-```
-
-- `BoneRef.Weight`：该骨骼在 BoneChain 中配置的权重（艺术控制）
-- `Alpha`：全局混合系数（如瞄准状态插值）
-- `BlendedRotation`：权重限制后的旋转 避免单根骨骼转动过猛
-
-**Step 4 — 传播与迭代**
-
-将 `BlendedRotation` 应用到当前骨骼后 立即把旋转写入 Pose 并传播给所有子骨骼。下一根骨骼在**已被修改过的 Pose** 上继续求解。多次迭代后 整条骨骼链逐渐收敛到目标方向。
-
-### Singularity Handling
-
-两个安全措施防止求解不稳定：
-
-1. **ClampWeight** — 当目标几乎在瞄准方向正后方（接近 180°）时 求解器将有效目标平滑钳制到当前前向附近 防止躯干剧烈翻转。
-2. **Singularity Offset** — 当目标恰好落在骨骼链延长线上（线性奇异点）时 施加一个微小的垂直偏移 给求解器提供非退化的旋转轴。
-
-### Pole Constraint (Optional)
-
-当 `PoleWeight > 0` 时 求解器叠加一个二级旋转 使用户定义的极轴朝向极目标。用于防止躯干在极端垂直瞄准时发生侧翻。
-
----
-
-## Key Design Decisions
-
-### 1. Pose-Native Aim Source
-
-瞄准源**不是**每帧从外部推入的世界坐标。而是从当前 Pose 内部重建：
-
-```cpp
-FTransform AimSourceBoneCS = Output.Pose.GetComponentSpaceTransform(AimSourceBoneIndex);
-FTransform CurrentAimTransformCS = AimSourceLocalTransform * AimSourceBoneCS;
-```
-
-这消除了早期实现中的帧间反馈振荡：
-
-```
-第 N 帧：   IK 旋转脊柱 → 枪口位置移动
-第 N+1 帧：新的枪口位置作为输入反馈 → IK 过度修正
-```
-
-### 2. Stable Binding Transform
-
-`AimSourceLocalTransform` 是一个**稳定的绑定关系**（如枪口相对 `hand_r` 的局部偏移）。应在装备时计算**一次** 之后不再每帧更新。
-
-### 3. Single Runtime Module with Conditional Editor Macros
-
-与许多拆分 Runtime 和 Editor 模块的 UE 插件不同 BBBAimIK 将所有内容保留在一个 Runtime 模块中：
-
-- `FAnimNode_AimIK` — 始终编译
-- `UAnimGraphNode_AimIK` — 用 `#if WITH_EDITOR` / `#if WITH_EDITORONLY_DATA` 包裹
-
-这避免了 "Editor Only module" 蓝图警告 同时保证 Shipping 构建安全（编辑器代码被剥离）。
-
-### 4. Descendant Validation
-
-初始化时 求解器遍历骨骼层级 验证 `AimSourceBoneName` 是否为骨骼链末端骨骼的后代。若不是 则静默跳过求值。这一硬约束防止错误配置的骨骼链产生无效输出。
-
----
-
-## Installation
-
-### 1. Copy the Plugin
-
-Copy `BBBAimIK/` into your project's `Plugins/` directory:
+## 运行流程
 
 ```text
-YourProject/
-└── Plugins/
-    └── BBBAimIK/
-        ├── BBBAimIK.uplugin
-        └── Source/
-            └── BBBAimIK/
-                ├── BBBAimIK.Build.cs
-                ├── Private/
-                │   ├── AnimNode_AimIK.cpp
-                │   ├── AnimGraphNode_AimIK.cpp
-                │   ├── AnimGraphNode_AimIK.h
-                │   └── BBBAimIK.cpp
-                └── Public/
-                    └── AnimNode_AimIK.h
+AnimBlueprint
+    -> FAnimNode_AimIK
+        -> 校验输入和缓存骨骼索引
+        -> 从当前 Pose 重建瞄准源组件空间变换
+        -> FAimIKSolver
+            -> 目标钳制
+            -> 线性奇点偏移
+            -> CCD 迭代
+            -> 极轴纠偏
+        -> 输出排序后的 FBoneTransform
+    -> Final Animation Pose
 ```
 
-### 2. Add Module Dependency
+瞄准源按以下关系重建：
 
-In your project's main `.Build.cs`:
+```cpp
+const FTransform AimSourceBoneTransformCS = Output.Pose.GetComponentSpaceTransform(AimSourceBoneIndex);
+const FTransform AimTransformCS = AimSourceLocalTransform * AimSourceBoneTransformCS;
+```
+
+`AimSourceLocalTransform` 表示瞄准源相对 `AimSourceBoneName` 的稳定绑定。它应在装备建立绑定时计算，而不是把求解结果作为下一帧输入。
+
+## 文件结构
+
+```text
+BBBAimIK/
+├── BBBAimIK.uplugin
+├── README.md
+└── Source/
+    ├── BBBAimIK/
+    │   ├── BBBAimIK.Build.cs
+    │   ├── Public/
+    │   │   └── AnimNode_AimIK.h
+    │   └── Private/
+    │       ├── AimIKBoneHierarchy.h
+    │       ├── AimIKBoneHierarchy.cpp
+    │       ├── AimIKSolver.h
+    │       ├── AimIKSolver.cpp
+    │       ├── AnimNode_AimIK.cpp
+    │       └── BBBAimIK.cpp
+    └── BBBAimIKEditor/
+        ├── BBBAimIKEditor.Build.cs
+        └── Private/
+            ├── AnimGraphNode_AimIK.h
+            ├── AnimGraphNode_AimIK.cpp
+            └── BBBAimIKEditor.cpp
+```
+
+各文件职责：
+
+- `AnimNode_AimIK`：公开配置、动画节点生命周期、骨骼缓存、诊断和结果输出。
+- `AimIKSolver`：不依赖编辑器模块的组件空间 CCD 求解。
+- `AimIKBoneHierarchy`：集中处理瞄准源与链尖端之间的层级判断。
+- `AnimGraphNode_AimIK`：节点菜单、显示信息和编译期配置警告。
+
+## 安装
+
+1. 将 `BBBAimIK` 目录复制到工程的 `Plugins/` 下。
+2. 在 `.uproject` 的 `Plugins` 数组中启用 `BBBAimIK`。
+3. 重新生成工程文件并编译 Editor Target。
+
+只有在其他 C++ 模块直接引用 `FAnimNode_AimIK` 时，才需要在该模块的 `.Build.cs` 中添加：
 
 ```csharp
-PublicDependencyModuleNames.AddRange(new string[]
+PrivateDependencyModuleNames.AddRange(new string[]
 {
-    // ... existing modules ...
     "BBBAimIK"
 });
 ```
 
-> The plugin's editor dependencies (`AnimGraph`, `BlueprintGraph`, `UnrealEd`) are already handled conditionally inside `BBBAimIK.Build.cs`. You do **not** need to add them to your project.
+不要在游戏 Runtime 模块中依赖 `BBBAimIKEditor`。
 
-### 3. Regenerate & Compile
+## 动画蓝图配置
 
-1. Right-click `.uproject` → **Generate Visual Studio project files**
-2. Compile your project (Editor target)
+### 1. 添加节点
 
----
+1. 打开角色的 Animation Blueprint。
+2. 进入 `AnimGraph`。
+3. 在需要进行上半身瞄准的位置右键。
+4. 搜索 `Aim IK`。
+5. 如果搜索结果中存在同名节点，选择分类为 `BBB > IK`、标题为 `Aim IK` 的节点。
+6. 将上游 Pose 接到节点左侧的组件空间 Pose 输入，再将节点输出接到后续节点或 `Final Animation Pose`。
 
-## AnimBlueprint Setup
+该节点继承自 Skeletal Control。若当前图中使用的是 Local Space Pose，需要按动画蓝图提示连接 `Convert Local to Component Space` 和 `Convert Component to Local Space`。
 
-### Step 1 — Place the Node
+### 2. 配置 BoneChain
 
-1. Open your character's AnimBlueprint
-2. In the **AnimGraph**, right-click before **Final Animation Pose**
-3. Search **"Aim IK"** → select **BBB|IK → Aim IK**
+`BoneChain` 必须按照从根到尖端的骨骼层级排列。以五段脊柱为例：
 
-### Step 2 — Configure the Bone Chain
+| 顺序 | BoneName | Weight 示例 |
+|---:|---|---:|
+| 0 | `spine_01` | `0.2` |
+| 1 | `spine_02` | `0.3` |
+| 2 | `spine_03` | `0.5` |
+| 3 | `spine_04` | `0.7` |
+| 4 | `spine_05` | `0.8` |
 
-In the node's **Details** panel, expand **BoneChain** and add bones in order (root → tip):
+`AimSourceBoneName` 必须是链尖端自身或其后代。例如链尖端为 `spine_05` 时，可以使用挂在其下的 `hand_r`。
 
-| Index | Bone Name | Recommended Weight |
-|-------|-----------|-------------------|
-| 0 | `spine_01` | 0.2 |
-| 1 | `spine_02` | 0.3 |
-| 2 | `spine_03` | 0.5 |
-| 3 | `spine_04` | 0.7 |
-| 4 | `spine_05` | 0.8 |
+### 3. 连接输入
 
-> The order must be parent → child. Weights control how much each bone participates in the solve.
+在节点详情面板中，将需要动态驱动的属性暴露为引脚，然后按类型连接：
 
-### Step 3 — Configure the Aim Source
+| 输入引脚 | 类型 | 连接内容 |
+|---|---|---|
+| `Aim Source Local Transform` | Transform | 瞄准源相对 `AimSourceBoneName` 的稳定局部绑定 |
+| `Aim Target` | Vector | Skeletal Mesh 组件空间中的目标位置 |
+| `Has Valid Aim Target` | Boolean | 当前目标是否有效 |
+| `Alpha` | Float | 整个 Skeletal Control 的混合权重 |
 
-| Property | Value | Source |
-|----------|-------|--------|
-| `AimSourceBoneName` | `hand_r` | The bone that carries the virtual muzzle |
-| `AimSourceLocalTransform` | Your cached offset | Equipment system (computed once at equip) |
-| `AimAxis` | `(1, 0, 0)` | Local axis of the aim source that points forward |
+如果目标来自世界空间，先使用当前 Skeletal Mesh 组件的逆变换把目标位置转换到组件空间，再写入动画实例变量。不要把世界空间位置直接连接到 `Aim Target`。
 
-> `AimSourceBoneName` must be a descendant of the chain tip bone (e.g. `spine_05 → ... → hand_r`).
+### 4. 配置瞄准轴
 
-### Step 4 — Wire the Input Pins
+- `AimAxis` 是瞄准源局部空间中指向前方的轴，默认是 `X+`。
+- `PoleAxis` 是瞄准源局部空间中用于约束翻转的参考轴，默认是 `Z+`。
+- `PoleTarget` 和 `AimTarget` 一样使用组件空间。
+- 不需要极轴约束时，将 `PoleWeight` 保持为 `0`。
 
-Connect from your AnimInstance:
-
-```
-[AimSourceLocalTransform]    → [AimSourceLocalTransform] (AimIK Node)
-[AimTargetComponentSpace]    → [AimTarget]               (AimIK Node)
-[bHasValidAimTarget]         → [bHasValidAimTarget]      (AimIK Node)
-[bIsAiming]                  → [Alpha]                   (AimIK Node)
-```
-
-`AimTargetComponentSpace` is a `FVector` in **Component Space** (not world space).
-
-### Step 5 — Compile & Test
-
-1. **Compile** the AnimBlueprint
-2. **Play in Editor**
-3. Hold aim and move the camera — the upper body should rotate to track the target
-
----
-
-## Parameter Reference
-
-### Bone Chain
-
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `BoneChain` | `TArray<FAimIKBoneRef>` | `[]` | Ordered bone list (root → tip) with per-bone weights |
+## 参数说明
 
 ### Aim
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `AimSourceBoneName` | `FName` | `None` | Bone carrying the virtual aim source |
-| `AimSourceLocalTransform` | `FTransform` | `Identity` | Stable local offset of the aim source relative to `AimSourceBoneName` |
-| `AimAxis` | `FVector` | `(1,0,0)` | Local axis on the aim source that should point toward the target |
+| 参数 | 默认值 | 说明 |
+|---|---:|---|
+| `AimSourceBoneName` | `None` | 承载虚拟瞄准源的骨骼 |
+| `AimSourceLocalTransform` | Identity | 瞄准源相对承载骨骼的稳定局部变换 |
+| `AimAxis` | `(1, 0, 0)` | 应朝向目标的局部轴 |
 
 ### Solver
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `AimTarget` | `FVector` | `(0,0,0)` | Target position in **Component Space** |
-| `bHasValidAimTarget` | `bool` | `false` | Explicit validity flag. When false, the solver is skipped |
-| `MaxIterations` | `int32` | `4` | CCD iterations per frame. Higher = more accurate, more expensive |
-| `Tolerance` | `float` | `0.0` | Early-exit angular threshold (degrees). `0` = always iterate full count |
+| 参数 | 默认值 | 说明 |
+|---|---:|---|
+| `AimTarget` | `(0, 0, 0)` | 组件空间目标位置 |
+| `bHasValidAimTarget` | `false` | 显式目标有效标志，零向量仍可作为合法目标 |
+| `MaxIterations` | `4` | 每次评估的最大 CCD 迭代次数 |
+| `Tolerance` | `0` | 角度收敛阈值，`0` 表示不提前停止 |
 
-### Clamp
+### Safety 与 Clamp
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `ClampWeight` | `float` | `0.1` | How aggressively to clamp the target toward current forward when near 180° |
-| `ClampSmoothing` | `int32` | `2` | Number of smoothing passes applied to the clamp blend |
+| 参数 | 默认值 | 说明 |
+|---|---:|---|
+| `bEnableMinTargetDistanceGuard` | `true` | 是否跳过距离过近的目标 |
+| `MinTargetDistance` | `30` | 允许求解的最小组件空间距离 |
+| `ClampWeight` | `0.1` | 对接近反方向的目标进行钳制的强度 |
+| `ClampSmoothing` | `2` | 钳制曲线的平滑次数 |
 
-### Pole
+### Pole 与 Debug
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `PoleAxis` | `FVector` | `(0,0,1)` | Local axis defining "up" for the aim source |
-| `PoleTarget` | `FVector` | `(0,0,0)` | Target position in Component Space for the pole axis |
-| `PoleWeight` | `float` | `0.0` | How strongly to enforce the pole constraint |
+| 参数 | 默认值 | 说明 |
+|---|---:|---|
+| `PoleAxis` | `(0, 0, 1)` | 瞄准源局部极轴 |
+| `PoleTarget` | `(0, 0, 0)` | 组件空间极轴目标 |
+| `PoleWeight` | `0` | 极轴纠偏权重 |
+| `bEnableDebugLogging` | `false` | 输出初始化、提前退出、姿态跳变和求解采样日志 |
+| `DebugSolveLogInterval` | `60` | 求解日志采样间隔 |
 
-### Debug
+动画评估可能运行在工作线程。调试日志仅用于定位问题，生产环境应保持关闭。
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `bEnableDebugLogging` | `bool` | `false` | Enables `LogAnimation` output for solver diagnostics |
+## 编译期检查
 
----
+动画蓝图编译时会检查：
 
-## Architecture
+- `BoneChain` 是否为空。
+- `AimAxis` 是否为零向量。
+- `AimSourceBoneName` 是否已设置并存在于 Skeleton。
+- 骨骼链中的名称是否存在于 Skeleton。
+- 瞄准源是否为链尖端自身或其后代。
 
-```
-[Weapon Equip]
-    ↓
-[Cache AimSourceLocalTransform]  (Muzzle relative to hand_r, computed once)
-    ↓
-[AnimInstance::NativeUpdateAnimation]
-    ↓
-[AimTargetComponentSpace]  ←  WorldToMesh.TransformPosition(AimTargetWorld)
-[AimSourceLocalTransform]  ←  WeaponComponent (cached stable binding)
-[bHasValidAimTarget]       ←  bHasValidAimIKTarget && bHasValidAimSource
-    ↓
-[AnimGraph: Aim IK Node]
-    ↓
-[InitializeBoneReferences]
-    - Resolve BoneChain indices
-    - Resolve AimSourceBoneName index
-    - Validate AimSourceBone is descendant of chain tip
-    ↓
-[EvaluateSkeletalControl_AnyThread]
-    - Reconstruct CurrentAimTransformCS from Pose
-    - Clamp target (180° guard)
-    - Offset singularity
-    - CCD iterate over BoneChain
-    - Output sorted FBoneTransform array
-    ↓
-[Final Animation Pose]
-```
+运行时初始化会使用同一层级判断再次防呆，骨骼配置无效时不会输出部分求解结果。
 
----
+## 兼容性
 
-## File Structure
-
-```
-Source/BBBAimIK/
-├── BBBAimIK.Build.cs
-├── Private/
-│   ├── BBBAimIK.cpp              # Module entry point (IMPLEMENT_MODULE)
-│   ├── AnimNode_AimIK.cpp        # CCD solver implementation
-│   ├── AnimGraphNode_AimIK.h     # Editor node declaration (WITH_EDITOR)
-│   └── AnimGraphNode_AimIK.cpp   # Editor node UI & validation (WITH_EDITOR)
-└── Public/
-    └── AnimNode_AimIK.h          # Runtime node definition (FAnimNode_AimIK)
-```
-
----
-
-## Compatibility
-
-- **Unreal Engine**: 5.6+
-- **Platforms**: All (runtime code is platform-agnostic; editor UI is Win64/macOS/Linux)
-- **Skeleton**: Any skeleton with a standard hierarchy. Bone names are user-configurable.
+- Unreal Engine：5.6+
+- 插件内容：纯 C++，`CanContainContent` 为 `false`
+- Runtime 模块：`BBBAimIK`
+- Editor 模块：`BBBAimIKEditor`，类型为 `UncookedOnly`
