@@ -4,8 +4,14 @@
 #include "AnimationCoreLibrary.h"
 #include "AnimationRuntime.h"
 
+//------------------------------------------------------------------------------
+
 void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBones)
 {
+	bHasPreviousInputPose = false;
+	PreviousAimSourceBoneTransformCS = FTransform::Identity;
+	PreviousChainTransformsCS.Reset();
+
 	const USkeleton* SkeletonAsset = RequiredBones.GetSkeletonAsset();
 	if (!SkeletonAsset)
 	{
@@ -36,6 +42,7 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
 		}
 	}
 
+	// 存在任何无效骨骼时整体判定为不可用
 	bCachedBonesValid = CachedBoneIndices.Num() > 0;
 	for (int32 BoneIndex : CachedBoneIndices)
 	{
@@ -60,6 +67,7 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
 		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Init] AimSourceBone unavailable for current skeleton/required bones: %s RefSkeletonIndex=%d"), *AimSourceBoneName.ToString(), AimSourceSkeletonIndex);}
 	}
 
+	// 沿父链向上回溯，确认瞄准源骨骼挂在链尖端之下，否则旋转链条无法带动瞄准源
 	bAimSourceIsChainDescendant = false;
 	if (bCachedBonesValid && AimSourceSkeletonIndex != INDEX_NONE)
 	{
@@ -114,10 +122,18 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
 	}
 }
 
+//------------------------------------------------------------------------------
+
 void FAnimNode_AimIK::CacheBones_AnyThread(const FAnimationCacheBonesContext& Context)
 {Super::CacheBones_AnyThread(Context);}
+
+//------------------------------------------------------------------------------
+
 bool FAnimNode_AimIK::IsValidToEvaluate(const USkeleton* Skeleton, const FBoneContainer& RequiredBones)
 {return bCachedBonesValid && AimSourceBoneIndex != INDEX_NONE && bAimSourceIsChainDescendant;}
+
+//------------------------------------------------------------------------------
+
 void FAnimNode_AimIK::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext& Output, TArray<FBoneTransform>& OutBoneTransforms)
 {
 	check(OutBoneTransforms.Num() == 0);
@@ -148,6 +164,9 @@ void FAnimNode_AimIK::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseConte
 	}
 	if (!bHasValidAimTarget)
 	{
+		bHasPreviousInputPose = false;
+		PreviousChainTransformsCS.Reset();
+
 		if (bEnableDebugLogging)
 		{UE_LOG(LogAnimation, Warning, TEXT("[AimIK][Eval] Early exit: bHasValidAimTarget=false"));}
 		return;
@@ -167,35 +186,92 @@ void FAnimNode_AimIK::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseConte
 	SolveAimIK(Output, OutBoneTransforms);
 }
 
+//------------------------------------------------------------------------------
+
 void FAnimNode_AimIK::SolveAimIK(FComponentSpacePoseContext& Output, TArray<FBoneTransform>& OutBoneTransforms)
 {
-	// 获取 IK 骨骼链上的骨骼节点数量
 	const int32 ChainCount = CachedBoneIndices.Num();
 	if (ChainCount == 0) 
 	{return;}
-	// 提前准备一个数组，存各骨骼的组件空间Transform
+
+	// 缓存各链节在当前姿态下的组件空间变换，后续全部基于该快照迭代
 	TArray<FTransform> ChainTransformsCS;
 	ChainTransformsCS.Reserve(ChainCount);
 	for (int32 BoneIndex : CachedBoneIndices)
 	{
-		// 从当前姿态(Pose)中读取组件空间的 Transform 并记录
 		ChainTransformsCS.Add(Output.Pose.GetComponentSpaceTransform(FCompactPoseBoneIndex(BoneIndex)));
 	}
 
-	// 提取瞄准源参考骨骼 (AimSourceBone) 的组件空间 Transform
+	// 由骨骼姿态与稳定局部绑定重建瞄准源，不依赖外部每帧回传
 	const FTransform AimSourceBoneCS = Output.Pose.GetComponentSpaceTransform(FCompactPoseBoneIndex(AimSourceBoneIndex));
-	// 结合局部偏移，计算真实的当前瞄准基准点，完全基于初始姿态 (Pose-native) 重建
 	FTransform CurrentAimTransformCS = AimSourceLocalTransform * AimSourceBoneCS;
 
-	// 获取初始的瞄准位置
 	const FVector InitialAimPosCS = CurrentAimTransformCS.GetLocation();
 	if (bEnableMinTargetDistanceGuard && FVector::Dist(InitialAimPosCS, AimTarget) <= MinTargetDistance)
 	{return;}
-	// 提取瞄准前向轴（根据 AimAxis 指定），并转换为组件空间的方向向量
+
 	const FVector InitialAimForwardCS = CurrentAimTransformCS.TransformVectorNoScale(AimAxis).GetSafeNormal();
-	if (InitialAimForwardCS.IsNearlyZero()) // 如果方向异常（接近零向量），则取消计算
+	if (InitialAimForwardCS.IsNearlyZero())
 	{return;}
-	// 通过时间和周期判断是否需要输出调试日志，避免日志刷屏
+
+	const float InputPositionDelta = FVector::Dist(
+		PreviousAimSourceBoneTransformCS.GetLocation(),
+		AimSourceBoneCS.GetLocation());
+	const float InputRotationDelta = FMath::RadiansToDegrees(
+		PreviousAimSourceBoneTransformCS.GetRotation().AngularDistance(AimSourceBoneCS.GetRotation()));
+	const bool bInputPoseJumped = bHasPreviousInputPose
+		&& (InputPositionDelta > 30.0f || InputRotationDelta > 45.0f);
+	if (bEnableDebugLogging && bInputPoseJumped)
+	{
+		const FVector TargetDirectionCS = (AimTarget - InitialAimPosCS).GetSafeNormal();
+		const float TargetAngle = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+			FVector::DotProduct(InitialAimForwardCS, TargetDirectionCS),
+			-1.0f,
+			1.0f)));
+
+		UE_LOG(
+			LogAnimation,
+			Warning,
+			TEXT("[AimIK][PoseJump] SourceBone=%s PositionDelta=%.3f RotationDelta=%.3f TargetDistance=%.3f TargetAngle=%.3f"),
+			*AimSourceBoneName.ToString(),
+			InputPositionDelta,
+			InputRotationDelta,
+			FVector::Dist(InitialAimPosCS, AimTarget),
+			TargetAngle);
+		UE_LOG(
+			LogAnimation,
+			Warning,
+			TEXT("[AimIK][PoseJump] PreviousSource Loc=%s Rot=%s CurrentSource Loc=%s Rot=%s"),
+			*PreviousAimSourceBoneTransformCS.GetLocation().ToString(),
+			*PreviousAimSourceBoneTransformCS.Rotator().ToString(),
+			*AimSourceBoneCS.GetLocation().ToString(),
+			*AimSourceBoneCS.Rotator().ToString());
+
+		for (int32 ChainIndex = 0; ChainIndex < ChainTransformsCS.Num(); ++ChainIndex)
+		{
+			const FTransform &CurrentChainTransform = ChainTransformsCS[ChainIndex];
+			const bool bHasPreviousChainTransform = PreviousChainTransformsCS.IsValidIndex(ChainIndex);
+			const FTransform PreviousChainTransform = bHasPreviousChainTransform
+				? PreviousChainTransformsCS[ChainIndex]
+				: FTransform::Identity;
+
+			UE_LOG(
+				LogAnimation,
+				Warning,
+				TEXT("[AimIK][PoseJump] ChainBone=%s PreviousLoc=%s PreviousRot=%s CurrentLoc=%s CurrentRot=%s"),
+				*BoneChain[ChainIndex].BoneName.ToString(),
+				*PreviousChainTransform.GetLocation().ToString(),
+				*PreviousChainTransform.Rotator().ToString(),
+				*CurrentChainTransform.GetLocation().ToString(),
+				*CurrentChainTransform.Rotator().ToString());
+		}
+	}
+
+	bHasPreviousInputPose = true;
+	PreviousAimSourceBoneTransformCS = AimSourceBoneCS;
+	PreviousChainTransformsCS = ChainTransformsCS;
+
+	// 按周期间隔采样输出调试日志，避免逐帧刷屏
 	const uint64 DebugInterval = static_cast<uint64>(FMath::Max(DebugSolveLogInterval, 1));
 	const bool bShouldLogSolve = bEnableDebugLogging && ((FPlatformTime::Cycles64() % DebugInterval) == 0);
 	if (bShouldLogSolve)
@@ -222,71 +298,57 @@ void FAnimNode_AimIK::SolveAimIK(FComponentSpacePoseContext& Output, TArray<FBon
 		UE_LOG(LogAnimation, Warning, TEXT("[AimIK] AimTarget: %s"), *AimTarget.ToString());
 	}
 
-	// IK骨链第一根骨骼（根侧起点）的位置，用于判断目标是否过近或是否拉成直线（奇点）
 	const FVector FirstBonePosCS = ChainTransformsCS[0].GetLocation();
 
-	// 以外界传入的 AimTarget 作为基础目标点
 	FVector EffectiveTargetCS = AimTarget;
 	if (ChainCount >= 2)
 	{
-		// 若骨链超过两个节点，尝试计算奇点偏移 (防止骨骼刚好在一条直线上导致打死结)
+		// 目标与链接近共线时施加法向微移，规避线性奇点导致的旋转不稳定
 		const FVector SingularityOffset = GetSingularityOffset(FirstBonePosCS, InitialAimPosCS, AimTarget);
 		if (!SingularityOffset.IsNearlyZero())
 		{
-			// 如果触及奇点情况，给目标点施加一个法向微调
 			EffectiveTargetCS += SingularityOffset;
 		}
 	}
 
-	// 对目标点进行钳制修正，防止躯干或手腕向后对折等不符合人体解剖学的过度弯曲
+	// 钳制目标方向，防止躯干或手臂出现反关节式过度弯折
 	const FVector ClampedTargetCS = GetClampedTargetCS(InitialAimPosCS, InitialAimForwardCS, EffectiveTargetCS);
-	// CCD (循环坐标下降法) 中计算骨链权重的递增步长分配
 	const float Step = 1.0f / static_cast<float>(ChainCount);
-	// 限制迭代次数在 [1, 20] 之间，防止死循环或过度降低性能
 	const int32 Iterations = FMath::Clamp(MaxIterations, 1, 20);
 
-	// 开启 CCD 多轮迭代逼近
 	for (int32 Iter = 0; Iter < Iterations; ++Iter)
 	{
-		// 沿骨链逐一向目标求旋转解
 		for (int32 ChainIndex = 0; ChainIndex < ChainCount; ++ChainIndex)
 		{
-			// 计算当前受算骨骼的权重分布：离根越近分摊得越少（利用 Step），以此提升末端瞄准精度
+			// 非尖端链节按离根距离递增分摊权重，尖端链节使用完整权重以保证末端瞄准精度
 			const float BoneWeightMultiplier = (ChainIndex < ChainCount - 1)
 				? Step * (ChainIndex + 1) * BoneChain[ChainIndex].Weight
 				: BoneChain[ChainIndex].Weight;
-			// 钳制在 [0, 1] 区间
 			const float Weight = FMath::Clamp(BoneWeightMultiplier, 0.0f, 1.0f);
 
 			if (Weight > KINDA_SMALL_NUMBER)
 			{
-				// 执行核心旋转：向目标靠拢，并把带来的位移/旋转递归作用于下游所有节点与 CurrentAimTransformCS
 				RotateBoneToTarget(ChainIndex, ClampedTargetCS, Weight, ChainTransformsCS, CurrentAimTransformCS);
 			}
 		}
 
-		// 如果不是首轮迭代，且设定了误差容忍度 (Tolerance) 参数
+		// 首轮迭代后按角度误差判断是否提前收敛
 		if (Iter >= 1 && Tolerance > KINDA_SMALL_NUMBER)
 		{
-			// 检测当前经过本轮修正后的最新瞄准方向
 			const FVector CurrentAimForwardCS = CurrentAimTransformCS.TransformVectorNoScale(AimAxis).GetSafeNormal();
-			// 指向所需目标的理想方向向量
 			const FVector ToTargetDir = (ClampedTargetCS - CurrentAimTransformCS.GetLocation()).GetSafeNormal();
 			if (!ToTargetDir.IsNearlyZero())
 			{
-				// 计算当前前向与理想目标的误差角度 (从点积转回角度)
 				const float Dot = FMath::Clamp(FVector::DotProduct(CurrentAimForwardCS, ToTargetDir), -1.0f, 1.0f);
 				const float AngleDeg = FMath::RadiansToDegrees(FMath::Acos(Dot));
 				if (AngleDeg < Tolerance)
 				{
-					// 误差落入容忍范围内，提前结束所有迭代
 					break;
 				}
 			}
 		}
 	}
 
-	// （如果有需要）记录最终运算结果的日志
 	if (bShouldLogSolve)
 	{
 		const FVector FinalAimForwardCS = CurrentAimTransformCS.TransformVectorNoScale(AimAxis).GetSafeNormal();
@@ -299,63 +361,49 @@ void FAnimNode_AimIK::SolveAimIK(FComponentSpacePoseContext& Output, TArray<FBon
 			FinalAngleDeg);
 	}
 
-	// 确保输出数组预留足够的空间
 	OutBoneTransforms.Reserve(ChainCount);
 	for (int32 ChainIndex = 0; ChainIndex < ChainCount; ++ChainIndex)
 	{
-		// 将链上每段变换转为紧凑骨骼索引对应的更新结果
 		OutBoneTransforms.Emplace(FCompactPoseBoneIndex(CachedBoneIndices[ChainIndex]), ChainTransformsCS[ChainIndex]);
 	}
-	// 按 UE 的规范要求对将要应用到 Pose 上的骨骼进行排序
+	// UE 要求输出按骨骼索引排序后再应用回姿态
 	OutBoneTransforms.Sort(FCompareBoneTransformIndex());
 }
 
+//------------------------------------------------------------------------------
+
 FVector FAnimNode_AimIK::GetSingularityOffset(const FVector& FirstBonePosCS, const FVector& AimPosCS, const FVector& TargetPosCS) const
 {
-	// C++语法：const FVector& 表示"常引用"，直接读取外部传入的向量数据，不发生内存拷贝，也不允许被修改（保证安全和性能）。
-
-	// C++运算符重载：FVector 类重载了减号（-），这里表示两个三维向量相减，计算从起始点到终点的方向向量。
 	const FVector ToAim = AimPosCS - FirstBonePosCS;
 	const FVector ToTarget = TargetPosCS - FirstBonePosCS;
 
-	// UE专属API：.Size() 是 FVector 的成员函数，用于计算该向量的长度（即两点间的距离）。
 	const float DistAim = ToAim.Size();
 	const float DistTarget = ToTarget.Size();
 
-	// 逻辑判断与宏：
-	// || 是逻辑或（OR），如果满足任何一个条件就进入花括号。
-	// KINDA_SMALL_NUMBER 是 UE 定义的一个极小的常量（比如 0.0001），用于浮点数比较，防止因为浮点精度误差导致崩溃（如除以0）。
-	// 判断：如果瞄准距离极短，或者目标距离极短，或者目标物理上已经超出了手臂/骨链的最大伸展范围，就不进行偏移计算。
+	// 距离过近无法判定共线，或目标已超出链伸展范围时无需偏移
 	if (DistAim < KINDA_SMALL_NUMBER || DistTarget < KINDA_SMALL_NUMBER || DistTarget > DistAim)
 	{
-		// 返回预定义的零向量常量 (0,0,0)
 		return FVector::ZeroVector;
 	}
 
-	// 线性代数：FVector::DotProduct 静态方法用于计算两个向量的点积。
-	// (ToAim / DistAim) 等价于将向量标准化（归一化为长度为 1 的方向向量）。
-	// 点积的几何意义是两个方向向量夹角的余弦值（Cosine）。
+	// 点积即两方向夹角余弦，接近 1 表示链根、瞄准源与目标几乎共线
 	const float Dot = FVector::DotProduct(ToAim / DistAim, ToTarget / DistTarget);
-
-	// 浮点比较：Cos接近1表示夹角接近0度，也就是三个点（骨链起点、瞄准起始点、目标点）几乎连成一条直线了。
-	// 如果 Dot < 0.999f (也就是说没有趋近于完全水平共线)，就不属于"奇点"（即骨链不会打死结），直接退出。
 	if (Dot < 0.999f)
 	{return FVector::ZeroVector;}
-	// UE专属API：.GetSafeNormal() 也是 FVector 的方法，它会将向量安全地归一化（转成长度1的方向向量），内部自带了防除零保护。
+
 	const FVector IKDirection = ToTarget.GetSafeNormal();
 
-	// C++构造函数：利用已有向量的 Y, Z, X 分量（按错位顺序）构建一个新的向量。
-	// 这样做的目的是人为制造一个与原方向不共线的辅助向量，专门用来作为接下来的叉乘基准。
+	// 错位分量构造与目标方向不共线的辅助向量，作为叉乘基准
 	const FVector SecondaryDir(IKDirection.Y, IKDirection.Z, IKDirection.X);
 
-	// 线性代数：FVector::CrossProduct 静态方法用于计算叉积。
-	// 两个向量叉乘的结果，一定会产生一个同时垂直于这两个向量的第三个全新向量（法向量）。
-	// 在这里，它造出了一个向外偏移侧向推力的方向。
+	// 叉乘得到同时垂直于两者的侧向法向，作为偏移方向
 	const FVector OffsetDir = FVector::CrossProduct(IKDirection, SecondaryDir);
 
-	// 返回结果：拿着这个侧推法向量，限制为长度1，然后乘以手臂/骨骼链总长(DistAim)的 5% 作为轻微偏移量，返回出去。
+	// 偏移量取链长的 5%，仅做轻微扰动
 	return OffsetDir.GetSafeNormal() * (DistAim * 0.05f);
 }
+
+//------------------------------------------------------------------------------
 
 FVector FAnimNode_AimIK::GetClampedTargetCS(const FVector& AimBonePosCS, const FVector& AimBoneForwardCS, const FVector& TargetCS) const
 {
@@ -371,25 +419,33 @@ FVector FAnimNode_AimIK::GetClampedTargetCS(const FVector& AimBonePosCS, const F
 	const float TargetDist = ToTarget.Size();
 	if (TargetDist < KINDA_SMALL_NUMBER)
 	{return TargetCS;}
+
+	// 将目标方向与瞄准前向的夹角归一化到 [0,1]，0 为正前方，1 为正后方
 	const FVector ToTargetDir = ToTarget / TargetDist;
 	const float AngleDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(AimBoneForwardCS, ToTargetDir), -1.0f, 1.0f)));
 	const float NormalizedAngle = 1.0f - (AngleDeg / 180.0f);
 	const float OneMinusNormalizedAngle = 1.0f - NormalizedAngle;
 	if (OneMinusNormalizedAngle <= KINDA_SMALL_NUMBER)
 	{return TargetCS;}
+
 	float TargetClampMlp = 1.0f;
 	if (ClampWeight > KINDA_SMALL_NUMBER)
 	{TargetClampMlp = FMath::Clamp(1.0f - ((ClampWeight - NormalizedAngle) / OneMinusNormalizedAngle), 0.0f, 1.0f);}
 	float ClampMlp = 1.0f;
 	if (ClampWeight > KINDA_SMALL_NUMBER)
 	{ClampMlp = FMath::Clamp(NormalizedAngle / ClampWeight, 0.0f, 1.0f);}
+
+	// 用半正弦曲线多次平滑钳制系数，让过渡更柔和
 	for (int32 Index = 0; Index < ClampSmoothing; ++Index)
 	{ClampMlp = FMath::Sin(ClampMlp * UE_PI * 0.5f);}
+
 	const FQuat RotQuat = FQuat::FindBetweenNormals(AimBoneForwardCS, ToTargetDir);
 	const FQuat SlerpedQuat = FQuat::Slerp(FQuat::Identity, RotQuat, ClampMlp * TargetClampMlp);
 	const FVector SlerpedDir = SlerpedQuat.RotateVector(AimBoneForwardCS);
 	return AimBonePosCS + SlerpedDir * TargetDist;
 }
+
+//------------------------------------------------------------------------------
 
 void FAnimNode_AimIK::RotateBoneToTarget(
 	int32 ChainIndex,
@@ -403,6 +459,7 @@ void FAnimNode_AimIK::RotateBoneToTarget(
 	const FVector CurrentAimForwardCS = InOutAimTransformCS.TransformVectorNoScale(AimAxis).GetSafeNormal();
 	if (CurrentAimForwardCS.IsNearlyZero())
 	{return;}
+
 	const uint64 DebugInterval = static_cast<uint64>(FMath::Max(DebugSolveLogInterval, 1));
 	if (bEnableDebugLogging && ((FPlatformTime::Cycles64() % DebugInterval) == 0))
 	{
@@ -416,11 +473,14 @@ void FAnimNode_AimIK::RotateBoneToTarget(
 	const FVector ToTargetDir = (TargetPosCS - CurrentAimPosCS).GetSafeNormal();
 	if (ToTargetDir.IsNearlyZero())
 	{return;}
+
+	// 摆动旋转按权重插值，权重越低单次修正越小
 	const FQuat SwingRot = FQuat::FindBetweenNormals(CurrentAimForwardCS, ToTargetDir);
 	const FQuat AppliedSwingRot = Weight >= 1.0f - KINDA_SMALL_NUMBER
 		? SwingRot
 		: FQuat::Slerp(FQuat::Identity, SwingRot, Weight);
 
+	// 极轴纠偏：将极轴拉向极目标在垂直于瞄准前向平面上的投影，防止身体翻转
 	FQuat AppliedPoleRot = FQuat::Identity;
 	if (PoleWeight > KINDA_SMALL_NUMBER)
 	{
@@ -438,6 +498,8 @@ void FAnimNode_AimIK::RotateBoneToTarget(
 	const FQuat TotalRot = AppliedPoleRot * AppliedSwingRot;
 	if (TotalRot.IsIdentity())
 	{return;}
+
+	// 以当前骨骼位置为支点，将旋转增量传播到所有下游链节
 	const FVector BonePos = BoneCS.GetLocation();
 	for (int32 DownstreamIndex = ChainIndex; DownstreamIndex < InOutChainTransforms.Num(); ++DownstreamIndex)
 	{
