@@ -122,22 +122,24 @@ PrivateDependencyModuleNames.AddRange(new string[]
 | 3 | `spine_04` | `0.7` |
 | 4 | `spine_05` | `0.8` |
 
-`AimSourceBoneName` 必须是链尖端自身或其后代。例如链尖端为 `spine_05` 时，可以使用挂在其下的 `hand_r`。
+然后配置`AimSourceBoneName`, 它的语义是“驱动骨骼链的最终目标骨骼”，比如你弯腰捡东西，最终是为了将手（Hand_r）伸到目标上,
+在对于正常的右手持枪场景下，设置为hand_r即可。
+`AimSourceBoneName` 必须是BoneChain的末骨骼自身或其后代。
 
 ### 3. 连接输入
 
 在节点详情面板中，将需要动态驱动的属性暴露为引脚，然后按类型连接：
 
-| 输入引脚 | 类型 | 连接内容 |
-|---|---|---|
-| `Aim Source Local Transform` | Transform | 瞄准源相对 `AimSourceBoneName` 的稳定局部绑定 |
-| `Aim Target` | Vector | Skeletal Mesh 组件空间中的目标位置 |
-| `Has Valid Aim Target` | Boolean | 当前目标是否有效 |
-| `Alpha` | Float | 整个 Skeletal Control 的混合权重 |
+| 输入引脚 | 类型 | 连接内容 | 人话 |
+|---|---|---|---|
+| `Aim Source Local Transform` | Transform | 瞄准源相对 `AimSourceBoneName` 的稳定局部绑定 | 枪口socket对于hand_r的偏移 |
+| `Aim Target` | Vector | Skeletal Mesh 组件空间中的目标位置 | 瞄准目标点对于角色mesh组件空间的坐标 |
+| `Has Valid Aim Target` | Boolean | 当前目标是否有效 | 开关 |
+| `Alpha` | Float | 整个 Skeletal Control 的混合权重 | 瞄准偏移的影响程度 1为完全叠加偏移结果 |
 
 如果目标来自世界空间，先使用当前 Skeletal Mesh 组件的逆变换把目标位置转换到组件空间，再写入动画实例变量。不要把世界空间位置直接连接到 `Aim Target`。
 
-### 4. 配置瞄准轴
+### 4. 配置瞄准轴(一般保持默认即可)
 
 - `AimAxis` 是瞄准源局部空间中指向前方的轴，默认是 `X+`。
 - `PoleAxis` 是瞄准源局部空间中用于约束翻转的参考轴，默认是 `Z+`。
