@@ -279,11 +279,10 @@ void FAnimNode_AimIK::SolveAimIK(
     }
 
     // 读取骨骼链的组件空间变换作为求解输入
-    TArray<FTransform> ChainTransformsCS;
-    ChainTransformsCS.Reserve(ChainCount);
+    WorkingChainTransformsCS.Reset(ChainCount);
     for (int32 BoneIndex : CachedBoneIndices)
     {
-        ChainTransformsCS.Add(
+        WorkingChainTransformsCS.Add(
             Output.Pose.GetComponentSpaceTransform(FCompactPoseBoneIndex(BoneIndex)));
     }
 
@@ -307,7 +306,7 @@ void FAnimNode_AimIK::SolveAimIK(
 
     UpdateInputPoseDiagnostics(
         AimSourceBoneTransformCS,
-        ChainTransformsCS,
+        WorkingChainTransformsCS,
         AimForwardCS,
         AimTransformCS.GetLocation());
 
@@ -330,7 +329,7 @@ void FAnimNode_AimIK::SolveAimIK(
 
     const FVector EffectiveTargetCS = FAimIKSolver::Solve(
         SolverInput,
-        ChainTransformsCS,
+        WorkingChainTransformsCS,
         AimTransformCS);
     if (bShouldLogSolve)
     {
@@ -343,7 +342,7 @@ void FAnimNode_AimIK::SolveAimIK(
     {
         OutBoneTransforms.Emplace(
             FCompactPoseBoneIndex(CachedBoneIndices[ChainIndex]),
-            ChainTransformsCS[ChainIndex]);
+            WorkingChainTransformsCS[ChainIndex]);
     }
 
     OutBoneTransforms.Sort(FCompareBoneTransformIndex());
@@ -366,6 +365,12 @@ void FAnimNode_AimIK::UpdateInputPoseDiagnostics(
     const FVector& AimForwardCS,
     const FVector& AimPositionCS)
 {
+    if (!bEnableDebugLogging)
+    {
+        bHasPreviousInputPose = false;
+        return;
+    }
+
     const float PositionDelta = FVector::Dist(
         PreviousAimSourceBoneTransformCS.GetLocation(),
         AimSourceBoneTransformCS.GetLocation());

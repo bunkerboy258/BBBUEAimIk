@@ -136,6 +136,9 @@ private:
     /** 骨骼链的紧凑姿态索引缓存 */
     TArray<int32> CachedBoneIndices;
 
+    /** 当前求值使用的骨骼链组件空间变换工作缓冲 */
+    TArray<FTransform> WorkingChainTransformsCS;
+
     /** 瞄准源骨骼的紧凑姿态索引 */
     int32 AimSourceBoneIndex = INDEX_NONE;
 
