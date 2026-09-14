@@ -148,6 +148,9 @@ private:
     /** 瞄准源是否为骨骼链尖端自身或其后代 */
     bool bAimSourceIsChainDescendant = false;
 
+    /** 求解诊断采样使用的求值帧计数 */
+    uint64 DebugSolveFrameCounter = 0;
+
     /** 是否已经记录上一帧的输入姿态 */
     bool bHasPreviousInputPose = false;
 

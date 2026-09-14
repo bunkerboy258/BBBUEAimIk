@@ -3,11 +3,11 @@
 #include "AimIKBoneHierarchy.h"
 #include "AimIKSolver.h"
 #include "AnimationRuntime.h"
-#include "HAL/PlatformTime.h"
 #include "ReferenceSkeleton.h"
 
 void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBones)
 {
+    DebugSolveFrameCounter = 0;
     ResetInputPoseDiagnostics();
 
     const USkeleton* SkeletonAsset = RequiredBones.GetSkeletonAsset();
@@ -149,6 +149,8 @@ void FAnimNode_AimIK::EvaluateSkeletalControl_AnyThread(
     TArray<FBoneTransform>& OutBoneTransforms)
 {
     check(OutBoneTransforms.Num() == 0);
+
+    ++DebugSolveFrameCounter;
 
     if (!bCachedBonesValid)
     {
@@ -441,7 +443,7 @@ bool FAnimNode_AimIK::ShouldLogSolve() const
 
     // 按帧周期采样，避免每帧刷屏
     return bEnableDebugLogging
-        && FPlatformTime::Cycles64() % DebugInterval == 0;
+        && DebugSolveFrameCounter % DebugInterval == 0;
 }
 
 //------------------------------------------------------------------------------
