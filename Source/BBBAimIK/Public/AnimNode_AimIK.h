@@ -89,10 +89,6 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver", meta = (PinShownByDefault))
     FVector AimTarget = FVector::ZeroVector;
 
-    /** 目标是否有效 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver", meta = (PinShownByDefault))
-    bool bHasValidAimTarget = false;
-
     ////
 
     /** 是否启用最小目标距离防呆 */
@@ -124,6 +120,7 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     //~ Begin FAnimNode_SkeletalControlBase Interface
     virtual void InitializeBoneReferences(const FBoneContainer& RequiredBones) override;
     virtual void CacheBones_AnyThread(const FAnimationCacheBonesContext& Context) override;
+    virtual void UpdateComponentPose_AnyThread(const FAnimationUpdateContext& Context) override;
     virtual void EvaluateSkeletalControl_AnyThread(
         FComponentSpacePoseContext& Output,
         TArray<FBoneTransform>& OutBoneTransforms) override;

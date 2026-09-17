@@ -144,6 +144,18 @@ bool FAnimNode_AimIK::IsValidToEvaluate(
 
 //------------------------------------------------------------------------------
 
+void FAnimNode_AimIK::UpdateComponentPose_AnyThread(const FAnimationUpdateContext& Context)
+{
+    Super::UpdateComponentPose_AnyThread(Context);
+    // 此时读取上一轮有效权重，确保停用后首次恢复求解前清空诊断历史
+    if (!FAnimWeight::IsRelevant(ActualAlpha))
+    {
+        ResetInputPoseDiagnostics();
+    }
+}
+
+//------------------------------------------------------------------------------
+
 void FAnimNode_AimIK::EvaluateSkeletalControl_AnyThread(
     FComponentSpacePoseContext& Output,
     TArray<FBoneTransform>& OutBoneTransforms)
@@ -205,19 +217,9 @@ void FAnimNode_AimIK::EvaluateSkeletalControl_AnyThread(
         return;
     }
 
-    if (!bHasValidAimTarget)
+    if (!ensureMsgf(!AimTarget.ContainsNaN(), TEXT("[AimIK] AimTarget contains non-finite components")))
     {
-        // 目标失效时同时清空跳变诊断历史，避免目标恢复后误报
         ResetInputPoseDiagnostics();
-
-        if (bEnableDebugLogging)
-        {
-            UE_LOG(
-                LogAnimation,
-                Warning,
-                TEXT("[AimIK][Eval] Early exit: AimTarget is invalid."));
-        }
-
         return;
     }
 
