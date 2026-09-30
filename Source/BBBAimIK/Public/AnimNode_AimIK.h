@@ -18,8 +18,8 @@ struct FAimIKBoneRef
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bone")
     FName BoneName;
 
-    /** 该骨骼在求解中分摊的旋转权重 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bone", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    /** 该骨骼每轮求解的旋转权重 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bone", meta = (ClampMin = "0.0", ClampMax = "1.0", ToolTip = "直接控制该骨骼每轮求解的旋转比例 0 为禁用 1 为完全应用"))
     float Weight = 1.0f;
 };
 

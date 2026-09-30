@@ -32,18 +32,13 @@ FVector FAimIKSolver::Solve(
         InitialAimPositionCS,
         InitialAimForwardCS,
         EffectiveTargetCS);
-    const float ChainStep = 1.0f / static_cast<float>(ChainCount);
     const int32 IterationCount = FMath::Clamp(Input.MaxIterations, 1, 20);
 
     for (int32 IterationIndex = 0; IterationIndex < IterationCount; ++IterationIndex)
     {
         for (int32 ChainIndex = 0; ChainIndex < ChainCount; ++ChainIndex)
         {
-            // 非尖端骨骼的权重随链深度递增，让根部分摊较小旋转、末端分摊较大旋转
-            const float BoneWeightMultiplier = ChainIndex < ChainCount - 1
-                ? ChainStep * static_cast<float>(ChainIndex + 1) * Input.BoneChain[ChainIndex].Weight
-                : Input.BoneChain[ChainIndex].Weight;
-            const float Weight = FMath::Clamp(BoneWeightMultiplier, 0.0f, 1.0f);
+            const float Weight = FMath::Clamp(Input.BoneChain[ChainIndex].Weight, 0.0f, 1.0f);
             if (Weight <= KINDA_SMALL_NUMBER)
             {
                 continue;
