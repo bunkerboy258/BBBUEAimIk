@@ -89,6 +89,14 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver", meta = (PinShownByDefault))
     FVector AimTarget = FVector::ZeroVector;
 
+    /** 基础目标方向的指数跟随速度 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim", meta = (PinShownByDefault, ClampMin = "0.01", ToolTip = "数值越大枪口越快追上目标 额外角度在跟随计算之后叠加"))
+    float AimFollowSpeed = 18.0f;
+
+    /** 跟随后叠加的向上与向右角度 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim", meta = (PinShownByDefault, ToolTip = "X 向上 Y 向右 单位为度 不经过目标跟随平滑"))
+    FVector2D AimOffsetDegrees = FVector2D::ZeroVector;
+
     ////
 
     /** 是否启用最小目标距离防呆 */
@@ -130,6 +138,15 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     //~ End FAnimNode_SkeletalControlBase Interface
 
 private:
+    /** 本帧动画更新间隔 */
+    float FollowDeltaSeconds = 0.0f;
+
+    /** 尚未应用额外偏移的世界空间方向 */
+    FVector FollowDirectionWorld = FVector::ForwardVector;
+
+    /** 是否已初始化跟随方向 */
+    bool bHasFollowDirection = false;
+
     /** 骨骼链的紧凑姿态索引缓存 */
     TArray<int32> CachedBoneIndices;
 

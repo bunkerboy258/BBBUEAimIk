@@ -3,11 +3,14 @@
 #include "AimIKBoneHierarchy.h"
 #include "AimIKSolver.h"
 #include "AnimationRuntime.h"
+#include "Animation/AnimInstanceProxy.h"
 #include "ReferenceSkeleton.h"
 
 void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBones)
 {
     DebugSolveFrameCounter = 0;
+    bHasFollowDirection = false;
+    FollowDeltaSeconds = 0.0f;
     ResetInputPoseDiagnostics();
 
     const USkeleton* SkeletonAsset = RequiredBones.GetSkeletonAsset();
@@ -147,10 +150,12 @@ bool FAnimNode_AimIK::IsValidToEvaluate(
 void FAnimNode_AimIK::UpdateComponentPose_AnyThread(const FAnimationUpdateContext& Context)
 {
     Super::UpdateComponentPose_AnyThread(Context);
+    FollowDeltaSeconds = FMath::Max(Context.GetDeltaTime(), 0.0f);
     // 此时读取上一轮有效权重，确保停用后首次恢复求解前清空诊断历史
     if (!FAnimWeight::IsRelevant(ActualAlpha))
     {
         ResetInputPoseDiagnostics();
+        bHasFollowDirection = false;
     }
 }
 
@@ -322,7 +327,40 @@ void FAnimNode_AimIK::SolveAimIK(
 
     FAimIKSolverInput SolverInput(BoneChain);
     SolverInput.AimAxis = AimAxis;
-    SolverInput.AimTargetCS = AimTarget;
+    const FTransform ComponentTransform = Output.AnimInstanceProxy->GetComponentTransform();
+    const FVector TargetDelta = AimTarget - AimTransformCS.GetLocation();
+    const double TargetDistance = TargetDelta.Size();
+    if (!ensureMsgf(FMath::IsFinite(AimFollowSpeed) && AimFollowSpeed > 0.0f
+        && !AimOffsetDegrees.ContainsNaN() && TargetDistance > UE_SMALL_NUMBER,
+        TEXT("AimIK 跟随速度或角度偏移无效")))
+    {
+        bHasFollowDirection = false;
+        return;
+    }
+
+    const FVector TargetDirectionWorld = ComponentTransform.TransformVectorNoScale(TargetDelta / TargetDistance).GetSafeNormal();
+    if (!bHasFollowDirection)
+    {
+        FollowDirectionWorld = TargetDirectionWorld;
+        bHasFollowDirection = true;
+    }
+
+    const float FollowAlpha = 1.0f - FMath::Exp(-AimFollowSpeed * FollowDeltaSeconds);
+    FollowDeltaSeconds = 0.0f;
+    const FQuat FollowRotation = FQuat::FindBetweenNormals(FollowDirectionWorld, TargetDirectionWorld);
+    FollowDirectionWorld = FQuat::Slerp(FQuat::Identity, FollowRotation, FollowAlpha).RotateVector(FollowDirectionWorld).GetSafeNormal();
+    const FVector Direction = ComponentTransform.InverseTransformVectorNoScale(FollowDirectionWorld).GetSafeNormal();
+    const FVector Up = ComponentTransform.InverseTransformVectorNoScale(FVector::UpVector).GetSafeNormal();
+    FVector Right = FVector::CrossProduct(Up, Direction).GetSafeNormal();
+    if (Right.IsNearlyZero())
+    {
+        Right = ComponentTransform.InverseTransformVectorNoScale(FVector::RightVector).GetSafeNormal();
+    }
+
+    const FQuat Pitch(Right, FMath::DegreesToRadians(-AimOffsetDegrees.X));
+    const FQuat Yaw(Up, FMath::DegreesToRadians(AimOffsetDegrees.Y));
+    SolverInput.AimTargetCS = AimTransformCS.GetLocation()
+        + Yaw.RotateVector(Pitch.RotateVector(Direction)) * TargetDistance;
     SolverInput.PoleAxis = PoleAxis;
     SolverInput.PoleTargetCS = PoleTarget;
     SolverInput.PoleWeight = PoleWeight;
