@@ -118,7 +118,7 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
     {
         UE_LOG(
             LogAnimation,
-            Warning,
+            Display,
             TEXT("[AimIK][Init] Result: bCachedBonesValid=%s AimSourceRefSkeletonIndex=%d AimSourceCompactPoseIndex=%d bAimSourceIsChainDescendant=%s"),
             bCachedBonesValid ? TEXT("true") : TEXT("false"),
             AimSourceSkeletonIndex,
@@ -419,8 +419,10 @@ void FAnimNode_AimIK::UpdateInputPoseDiagnostics(
     const float RotationDelta = FMath::RadiansToDegrees(
         PreviousAimSourceBoneTransformCS.GetRotation().AngularDistance(
             AimSourceBoneTransformCS.GetRotation()));
+    const float DiagnosticFrameScale = FMath::Max(FollowDeltaSeconds * 30.0f, 1.0f);
     const bool bInputPoseJumped = bHasPreviousInputPose
-        && (PositionDelta > 30.0f || RotationDelta > 45.0f);
+        && (PositionDelta > 30.0f * DiagnosticFrameScale
+            || RotationDelta > 45.0f * DiagnosticFrameScale);
     if (bEnableDebugLogging && bInputPoseJumped)
     {
         // 输入姿态发生跳变，输出目标角度与前后姿态供排查抖动来源
@@ -434,10 +436,11 @@ void FAnimNode_AimIK::UpdateInputPoseDiagnostics(
         UE_LOG(
             LogAnimation,
             Warning,
-            TEXT("[AimIK][PoseJump] SourceBone=%s PositionDelta=%.3f RotationDelta=%.3f TargetDistance=%.3f TargetAngle=%.3f"),
+            TEXT("[AimIK][PoseJump] SourceBone=%s PositionDelta=%.3f RotationDelta=%.3f DeltaSeconds=%.6f TargetDistance=%.3f TargetAngle=%.3f"),
             *AimSourceBoneName.ToString(),
             PositionDelta,
             RotationDelta,
+            FollowDeltaSeconds,
             FVector::Dist(AimPositionCS, AimTarget),
             TargetAngle);
         UE_LOG(
@@ -509,20 +512,20 @@ void FAnimNode_AimIK::LogSolveInput(
 
     UE_LOG(
         LogAnimation,
-        Warning,
+        Display,
         TEXT("[AimIK] Chain=%s Alpha=%.3f"),
         *ChainDescription,
         ActualAlpha);
     UE_LOG(
         LogAnimation,
-        Warning,
+        Display,
         TEXT("[AimIK] AimSourceBone=%s AimSourceLocalTransform Loc=%s Rot=%s"),
         *AimSourceBoneName.ToString(),
         *AimSourceLocalTransform.GetLocation().ToString(),
         *AimSourceLocalTransform.GetRotation().ToString());
     UE_LOG(
         LogAnimation,
-        Warning,
+        Display,
         TEXT("[AimIK] CurrentAimTransform Loc=%s Rot=%s Forward=%s Target=%s"),
         *AimTransformCS.GetLocation().ToString(),
         *AimTransformCS.GetRotation().ToString(),
@@ -549,7 +552,7 @@ void FAnimNode_AimIK::LogSolveOutput(
 
     UE_LOG(
         LogAnimation,
-        Warning,
+        Display,
         TEXT("[AimIK] FinalAimTransform Loc=%s Forward=%s ResidualAngle=%.3f"),
         *AimTransformCS.GetLocation().ToString(),
         *FinalAimForwardCS.ToString(),
