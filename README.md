@@ -122,7 +122,7 @@ PrivateDependencyModuleNames.AddRange(new string[]
 | 3 | `spine_04` | `0.7` |
 | 4 | `spine_05` | `0.8` |
 
-然后配置`AimSourceBoneName`  它的语义是"驱动骨骼链的最终目标骨骼" 比如你弯腰捡东西 最终是为了将手(Hand_r)伸到目标上 
+然后配置`AimSourceBoneName`  它的语义是"驱动骨骼链的最终目标骨骼" 比如你弯腰捡东西 最终是为了将手(Hand_r)伸到目标上
 在对于正常的右手持枪场景下 设置为hand_r即可.
 `AimSourceBoneName` 必须是BoneChain的末骨骼自身或其后代.
 
