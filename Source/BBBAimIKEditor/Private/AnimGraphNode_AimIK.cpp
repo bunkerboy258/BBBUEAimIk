@@ -7,7 +7,7 @@
 
 FText UAnimGraphNode_AimIK::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
-    return LOCTEXT("NodeTitle", "Aim IK");
+    return LOCTEXT("NodeTitle", "瞄准 IK");
 }
 
 //------------------------------------------------------------------------------
@@ -16,14 +16,14 @@ FText UAnimGraphNode_AimIK::GetTooltipText() const
 {
     return LOCTEXT(
         "NodeTooltip",
-        "Rotates a bone chain so the pose-local aim source points toward AimTarget.");
+        "旋转骨骼链 使当前姿态的局部瞄准源指向瞄准目标.");
 }
 
 //------------------------------------------------------------------------------
 
 FText UAnimGraphNode_AimIK::GetMenuCategory() const
 {
-    return LOCTEXT("NodeCategory", "BBB|IK");
+    return LOCTEXT("NodeCategory", "BBB|反向运动学");
 }
 
 //------------------------------------------------------------------------------
@@ -37,14 +37,14 @@ FLinearColor UAnimGraphNode_AimIK::GetNodeTitleColor() const
 
 FText UAnimGraphNode_AimIK::GetControllerDescription() const
 {
-    return LOCTEXT("ControllerDescription", "Aim IK");
+    return LOCTEXT("ControllerDescription", "瞄准 IK");
 }
 
 //------------------------------------------------------------------------------
 
 FString UAnimGraphNode_AimIK::GetNodeCategory() const
 {
-    return TEXT("BBB IK");
+    return TEXT("BBB 反向运动学");
 }
 
 //------------------------------------------------------------------------------
@@ -59,19 +59,19 @@ void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
     if (Node.BoneChain.Num() == 0)
     {
         MessageLog.Warning(
-            *LOCTEXT("NoBones", "@@ - BoneChain is empty. AimIK will have no effect.").ToString());
+            *LOCTEXT("NoBones", "@@ - 骨骼链为空 瞄准 IK 不会生效.").ToString());
     }
 
     if (Node.AimAxis.IsNearlyZero())
     {
         MessageLog.Warning(
-            *LOCTEXT("NoAimAxis", "@@ - AimAxis is zero. AimIK will have no effect.").ToString());
+            *LOCTEXT("NoAimAxis", "@@ - 瞄准轴为零向量 瞄准 IK 不会生效.").ToString());
     }
 
     if (Node.AimSourceBoneName.IsNone())
     {
         MessageLog.Warning(
-            *LOCTEXT("NoAimSourceBone", "@@ - AimSourceBoneName is not set. AimIK will have no effect.").ToString());
+            *LOCTEXT("NoAimSourceBone", "@@ - 未设置瞄准源骨骼 瞄准 IK 不会生效.").ToString());
     }
 
     if (!ForSkeleton)
@@ -87,7 +87,7 @@ void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
     {
         MessageLog.Warning(
             *FText::Format(
-                LOCTEXT("MissingAimSourceBone", "@@ - AimSourceBone '{0}' was not found in the skeleton."),
+                LOCTEXT("MissingAimSourceBone", "@@ - 骨架中找不到瞄准源骨骼 '{0}'."),
                 FText::FromName(Node.AimSourceBoneName)).ToString());
     }
 
@@ -97,7 +97,7 @@ void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
         if (BoneReference.BoneName.IsNone())
         {
             MessageLog.Warning(
-                *LOCTEXT("EmptyBone", "@@ - BoneChain contains an empty bone reference.").ToString());
+                *LOCTEXT("EmptyBone", "@@ - 骨骼链包含空骨骼引用.").ToString());
             continue;
         }
 
@@ -108,17 +108,17 @@ void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
 
         MessageLog.Warning(
             *FText::Format(
-                LOCTEXT("MissingBone", "@@ - Bone '{0}' was not found in the skeleton."),
+                LOCTEXT("MissingBone", "@@ - 骨架中找不到骨骼 '{0}'."),
                 FText::FromName(BoneReference.BoneName)).ToString());
     }
 
-    // 骨骼链或瞄准源缺失时不做层级校验，前面的警告已覆盖
+    // 骨骼链或瞄准源缺失时不做层级校验 前面的警告已覆盖
     if (Node.BoneChain.Num() == 0 || AimSourceIndex == INDEX_NONE)
     {
         return;
     }
 
-    // 瞄准源必须是链尖端或其后代，否则求解无法影响瞄准方向
+    // 瞄准源必须是链尖端或其后代 否则求解无法影响瞄准方向
     if (Node.HasValidAimSourceHierarchy(ReferenceSkeleton))
     {
         return;
@@ -128,7 +128,7 @@ void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
         *FText::Format(
             LOCTEXT(
                 "AimSourceNotChainDescendant",
-                "@@ - AimSourceBone '{0}' must be the chain tip or a descendant of chain tip '{1}'. AimIK will have no effect."),
+                "@@ - 瞄准源骨骼 '{0}' 必须是链尖骨骼 '{1}' 或其后代 瞄准 IK 不会生效."),
             FText::FromName(Node.AimSourceBoneName),
             FText::FromName(Node.BoneChain.Last().BoneName)).ToString());
 }

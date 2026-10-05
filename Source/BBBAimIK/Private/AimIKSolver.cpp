@@ -11,12 +11,12 @@ FVector FAimIKSolver::Solve(
         return Input.AimTargetCS;
     }
 
-    // 记录求解前的瞄准状态，钳制与奇点检测都基于初始姿态
+    // 记录求解前的瞄准状态 钳制与奇点检测都基于初始姿态
     const FVector InitialAimPositionCS = InOutAimTransformCS.GetLocation();
     const FVector InitialAimForwardCS = InOutAimTransformCS.TransformVectorNoScale(Input.AimAxis).GetSafeNormal();
     const FVector FirstBonePositionCS = InOutChainTransforms[0].GetLocation();
 
-    // 多节链在目标与链根共线时触及线性奇点，先给目标施加微小侧向偏移
+    // 多节链在目标与链根共线时触及线性奇点 先给目标施加微小侧向偏移
     FVector EffectiveTargetCS = Input.AimTargetCS;
     if (ChainCount >= 2)
     {
@@ -26,7 +26,7 @@ FVector FAimIKSolver::Solve(
             Input.AimTargetCS);
     }
 
-    // 按钳制强度把目标方向收敛到瞄准前向附近，规避 180 度反向奇点
+    // 按钳制强度把目标方向收敛到瞄准前向附近 规避 180 度反向奇点
     const FVector ClampedTargetCS = GetClampedTargetCS(
         Input,
         InitialAimPositionCS,
@@ -53,13 +53,13 @@ FVector FAimIKSolver::Solve(
                 InOutAimTransformCS);
         }
 
-        // 首轮迭代尚未生效，且未启用容差时无需评估收敛
+        // 首轮迭代尚未生效 且未启用容差时无需评估收敛
         if (IterationIndex < 1 || Input.Tolerance <= KINDA_SMALL_NUMBER)
         {
             continue;
         }
 
-        // 计算当前瞄准前向与目标方向的夹角，达到容差即提前结束迭代
+        // 计算当前瞄准前向与目标方向的夹角 达到容差即提前结束迭代
         const FVector CurrentAimForwardCS = InOutAimTransformCS.TransformVectorNoScale(Input.AimAxis).GetSafeNormal();
         const FVector ToTargetDirection = (ClampedTargetCS - InOutAimTransformCS.GetLocation()).GetSafeNormal();
         if (ToTargetDirection.IsNearlyZero())
@@ -96,7 +96,7 @@ FVector FAimIKSolver::GetClampedTargetCS(
 
     if (Input.ClampWeight >= 1.0f - KINDA_SMALL_NUMBER)
     {
-        // 全强度钳制时目标方向完全贴合瞄准前向，仅保留原始距离
+        // 全强度钳制时目标方向完全贴合瞄准前向 仅保留原始距离
         const float TargetDistance = FVector::Dist(AimPositionCS, TargetCS);
         return AimPositionCS + AimForwardCS * TargetDistance;
     }
@@ -108,7 +108,7 @@ FVector FAimIKSolver::GetClampedTargetCS(
         return TargetCS;
     }
 
-    // 计算目标方向相对瞄准前向的归一化夹角，0 为同向、1 为反向
+    // 计算目标方向相对瞄准前向的归一化夹角 0 为同向 1 为反向
     const FVector ToTargetDirection = ToTarget / TargetDistance;
     const float DirectionDot = FMath::Clamp(
         FVector::DotProduct(AimForwardCS, ToTargetDirection),
@@ -119,11 +119,11 @@ FVector FAimIKSolver::GetClampedTargetCS(
     const float OneMinusNormalizedAngle = 1.0f - NormalizedAngle;
     if (OneMinusNormalizedAngle <= KINDA_SMALL_NUMBER)
     {
-        // 目标已与瞄准前向同向，无需钳制
+        // 目标已与瞄准前向同向 无需钳制
         return TargetCS;
     }
 
-    // 按钳制强度与当前夹角计算本次允许转向的比例，夹角越小钳制越弱
+    // 按钳制强度与当前夹角计算本次允许转向的比例 夹角越小钳制越弱
     const float TargetClampMultiplier = FMath::Clamp(
         1.0f - (Input.ClampWeight - NormalizedAngle) / OneMinusNormalizedAngle,
         0.0f,
@@ -133,13 +133,13 @@ FVector FAimIKSolver::GetClampedTargetCS(
         0.0f,
         1.0f);
 
-    // 通过正弦曲线重复平滑钳制比例，让边界过渡更柔和
+    // 通过正弦曲线重复平滑钳制比例 让边界过渡更柔和
     for (int32 SmoothingIndex = 0; SmoothingIndex < Input.ClampSmoothing; ++SmoothingIndex)
     {
         ClampMultiplier = FMath::Sin(ClampMultiplier * UE_PI * 0.5f);
     }
 
-    // 保持目标距离不变，把瞄准前向按钳制比例摆向目标方向
+    // 保持目标距离不变 把瞄准前向按钳制比例摆向目标方向
     const FQuat TargetRotation = FQuat::FindBetweenNormals(AimForwardCS, ToTargetDirection);
     const FQuat ClampedRotation = FQuat::Slerp(
         FQuat::Identity,
@@ -176,7 +176,7 @@ FVector FAimIKSolver::GetSingularityOffset(
         return FVector::ZeroVector;
     }
 
-    // 由 IK 方向构造一个正交偏移方向，把目标推离共线位置
+    // 由 IK 方向构造一个正交偏移方向 把目标推离共线位置
     const FVector IKDirection = ToTarget.GetSafeNormal();
     const FVector SecondaryDirection(
         IKDirection.Y,
@@ -225,7 +225,7 @@ void FAimIKSolver::RotateBoneToTarget(
     FQuat AppliedPoleRotation = FQuat::Identity;
     if (Input.PoleWeight > KINDA_SMALL_NUMBER)
     {
-        // 极轴方向投影到垂直于瞄准前向的平面，避免引入绕瞄准轴的额外扭转
+        // 极轴方向投影到垂直于瞄准前向的平面 避免引入绕瞄准轴的额外扭转
         const FVector CurrentAimPoleAxis = InOutAimTransformCS.TransformVectorNoScale(Input.PoleAxis).GetSafeNormal();
         const FVector PoleDirection = Input.PoleTargetCS - CurrentAimPositionCS;
         const FVector OrthogonalPoleDirection = (
@@ -243,14 +243,14 @@ void FAimIKSolver::RotateBoneToTarget(
         }
     }
 
-    // 极轴纠偏叠加在摆动旋转之后，一次性应用
+    // 极轴纠偏叠加在摆动旋转之后 一次性应用
     const FQuat TotalRotation = AppliedPoleRotation * AppliedSwingRotation;
     if (TotalRotation.IsIdentity())
     {
         return;
     }
 
-    // 以当前骨骼位置为枢轴，把旋转增量传播到链上所有下游骨骼
+    // 以当前骨骼位置为枢轴 把旋转增量传播到链上所有下游骨骼
     const FVector BonePositionCS = BoneTransformCS.GetLocation();
     for (int32 DownstreamIndex = ChainIndex; DownstreamIndex < InOutChainTransforms.Num(); ++DownstreamIndex)
     {
@@ -262,7 +262,7 @@ void FAimIKSolver::RotateBoneToTarget(
             TotalRotation * DownstreamTransform.GetRotation());
     }
 
-    // 瞄准源随链同步旋转，供下一链节读取最新瞄准状态
+    // 瞄准源随链同步旋转 供下一链节读取最新瞄准状态
     InOutAimTransformCS.SetLocation(
         BonePositionCS
         + TotalRotation.RotateVector(InOutAimTransformCS.GetLocation() - BonePositionCS));

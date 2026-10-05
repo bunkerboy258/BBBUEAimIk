@@ -17,7 +17,7 @@ struct FAimIKSolverInput
     {
     }
 
-    /** 骨骼链配置，按骨骼层级从根到尖端排列 */
+    /** 骨骼链配置 按骨骼层级从根到尖端排列 */
     const TArray<FAimIKBoneRef>& BoneChain;
 
     /** 瞄准源上应指向目标的局部轴 */
@@ -44,7 +44,7 @@ struct FAimIKSolverInput
     /** CCD 最大迭代次数 */
     int32 MaxIterations = 1;
 
-    /** 提前停止迭代的最小角度误差，单位为度 */
+    /** 提前停止迭代的最小角度误差 单位为度 */
     float Tolerance = 0.0f;
 };
 
@@ -89,7 +89,7 @@ private:
      * @param FirstBonePositionCS  链根骨骼组件空间位置
      * @param AimPositionCS        瞄准源组件空间位置
      * @param TargetPositionCS     目标组件空间位置
-     * @return 未触及奇点时返回零向量，否则返回偏移向量
+     * @return 未触及奇点时返回零向量 否则返回偏移向量
      */
     static FVector GetSingularityOffset(
         const FVector& FirstBonePositionCS,

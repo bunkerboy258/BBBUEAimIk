@@ -15,7 +15,7 @@ class BBBAIMIKEDITOR_API UAnimGraphNode_AimIK : public UAnimGraphNode_SkeletalCo
 
 public:
     /** 运行时节点配置 */
-    UPROPERTY(EditAnywhere, Category = "Settings")
+    UPROPERTY(EditAnywhere, Category = "设置", meta = (DisplayName = "节点配置"))
     FAnimNode_AimIK Node;
 
     //~ Begin UAnimGraphNode_SkeletalControlBase Interface

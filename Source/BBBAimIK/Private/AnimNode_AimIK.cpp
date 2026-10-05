@@ -34,7 +34,7 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
 
     const FReferenceSkeleton& ReferenceSkeleton = SkeletonAsset->GetReferenceSkeleton();
 
-    // 逐节解析骨骼链的紧凑姿态索引，缺失的骨骼记录为 INDEX_NONE
+    // 逐节解析骨骼链的紧凑姿态索引 缺失的骨骼记录为 INDEX_NONE
     CachedBoneIndices.Reset(BoneChain.Num());
     for (const FAimIKBoneRef& BoneReference : BoneChain)
     {
@@ -94,7 +94,7 @@ void FAnimNode_AimIK::InitializeBoneReferences(const FBoneContainer& RequiredBon
         }
     }
 
-    // 瞄准源必须位于链尖端或其后代，否则求解无法影响瞄准方向
+    // 瞄准源必须位于链尖端或其后代 否则求解无法影响瞄准方向
     bAimSourceIsChainDescendant = HasValidAimSourceHierarchy(ReferenceSkeleton);
     if (!bAimSourceIsChainDescendant)
     {
@@ -151,7 +151,7 @@ void FAnimNode_AimIK::UpdateComponentPose_AnyThread(const FAnimationUpdateContex
 {
     Super::UpdateComponentPose_AnyThread(Context);
     FollowDeltaSeconds = FMath::Max(Context.GetDeltaTime(), 0.0f);
-    // 此时读取上一轮有效权重，确保停用后首次恢复求解前清空诊断历史
+    // 此时读取上一轮有效权重 确保停用后首次恢复求解前清空诊断历史
     if (!FAnimWeight::IsRelevant(ActualAlpha))
     {
         ResetInputPoseDiagnostics();
@@ -303,7 +303,7 @@ void FAnimNode_AimIK::SolveAimIK(
     if (bEnableMinTargetDistanceGuard
         && FVector::Dist(AimTransformCS.GetLocation(), AimTarget) <= MinTargetDistance)
     {
-        // 目标距离过近时放弃求解，防止目标方向退化
+        // 目标距离过近时放弃求解 防止目标方向退化
         return;
     }
 
@@ -378,7 +378,7 @@ void FAnimNode_AimIK::SolveAimIK(
         LogSolveOutput(AimTransformCS, EffectiveTargetCS);
     }
 
-    // 把求解后的链变换写入输出，并按骨骼索引排序
+    // 把求解后的链变换写入输出 并按骨骼索引排序
     OutBoneTransforms.Reserve(ChainCount);
     for (int32 ChainIndex = 0; ChainIndex < ChainCount; ++ChainIndex)
     {
@@ -425,7 +425,7 @@ void FAnimNode_AimIK::UpdateInputPoseDiagnostics(
             || RotationDelta > 45.0f * DiagnosticFrameScale);
     if (bEnableDebugLogging && bInputPoseJumped)
     {
-        // 输入姿态发生跳变，输出目标角度与前后姿态供排查抖动来源
+        // 输入姿态发生跳变 输出目标角度与前后姿态供排查抖动来源
         const FVector TargetDirectionCS = (AimTarget - AimPositionCS).GetSafeNormal();
         const float TargetDirectionDot = FMath::Clamp(
             FVector::DotProduct(AimForwardCS, TargetDirectionCS),
@@ -454,7 +454,7 @@ void FAnimNode_AimIK::UpdateInputPoseDiagnostics(
 
         for (int32 ChainIndex = 0; ChainIndex < ChainTransformsCS.Num(); ++ChainIndex)
         {
-            // 上一帧链缓存可能因链长变化而缺项，缺项时以单位变换占位
+            // 上一帧链缓存可能因链长变化而缺项 缺项时以单位变换占位
             const FTransform& CurrentChainTransform = ChainTransformsCS[ChainIndex];
             const FTransform PreviousChainTransform = PreviousChainTransformsCS.IsValidIndex(ChainIndex)
                 ? PreviousChainTransformsCS[ChainIndex]
@@ -484,7 +484,7 @@ bool FAnimNode_AimIK::ShouldLogSolve() const
     const uint64 DebugInterval = static_cast<uint64>(
         FMath::Max(DebugSolveLogInterval, 1));
 
-    // 按帧周期采样，避免每帧刷屏
+    // 按帧周期采样 避免每帧刷屏
     return bEnableDebugLogging
         && DebugSolveFrameCounter % DebugInterval == 0;
 }
@@ -495,7 +495,7 @@ void FAnimNode_AimIK::LogSolveInput(
     const FTransform& AimTransformCS,
     const FVector& AimForwardCS) const
 {
-    // 拼接骨骼链描述，形如 Root(1.00) -> Mid(0.50) -> Tip(1.00)
+    // 拼接骨骼链描述 形如 Root(1.00) -> Mid(0.50) -> Tip(1.00)
     FString ChainDescription;
     for (const FAimIKBoneRef& BoneReference : BoneChain)
     {
