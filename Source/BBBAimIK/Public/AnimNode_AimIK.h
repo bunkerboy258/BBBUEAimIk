@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AimIKResponse.h"
 #include "BoneControllers/AnimNode_SkeletalControlBase.h"
 #include "AnimNode_AimIK.generated.h"
 
@@ -89,13 +90,9 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "求解器", meta = (PinShownByDefault, DisplayName = "瞄准目标"))
     FVector AimTarget = FVector::ZeroVector;
 
-    /** 基础目标方向的指数跟随速度 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (PinShownByDefault, ClampMin = "0.01", ToolTip = "数值越大枪口越快追上目标 额外角度在跟随计算之后叠加", DisplayName = "瞄准跟随速度"))
+    /** 输入姿势受到扰动后朝真实目标纠正的指数速率 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (PinShownByDefault, ClampMin = "0.01", ToolTip = "单位为每秒 越大实际持枪朝向纠正越快 目标保持不变 输入姿势的扰动也参与跨帧响应", DisplayName = "瞄准纠正速率"))
     float AimFollowSpeed = 18.0f;
-
-    /** 跟随后叠加的向上与向右角度 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (PinShownByDefault, ToolTip = "X 向上 Y 向右 单位为度 不经过目标跟随平滑", DisplayName = "瞄准角度偏移"))
-    FVector2D AimOffsetDegrees = FVector2D::ZeroVector;
 
     ////
 
@@ -141,11 +138,8 @@ private:
     /** 本帧动画更新间隔 */
     float FollowDeltaSeconds = 0.0f;
 
-    /** 尚未应用额外偏移的世界空间方向 */
-    FVector FollowDirectionWorld = FVector::ForwardVector;
-
-    /** 是否已初始化跟随方向 */
-    bool bHasFollowDirection = false;
+    /** 输入姿势受扰动后朝真实目标纠正的跨帧响应 */
+    FAimIKResponse AimResponse;
 
     /** 骨骼链的紧凑姿态索引缓存 */
     TArray<int32> CachedBoneIndices;
