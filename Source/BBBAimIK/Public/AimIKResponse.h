@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 
-/** 由输入姿势扰动与目标纠正共同维护的世界空间朝向 */
+/** 独立于输入姿势变化并按时间追随目标的世界空间朝向 */
 struct FAimIKResponse
 {
     /**
@@ -15,8 +15,8 @@ struct FAimIKResponse
     }
 
     /**
-     * 接收输入姿势的旋转增量 再按时间连续纠正到真实目标
-     * @param InputDirection	当前输入姿势的世界单位朝向
+     * 从首次输入姿势开始按时间连续追随真实目标 后续姿势变化不累积到响应方向
+     * @param InputDirection	仅初始化时读取的当前输入姿势世界单位朝向
      * @param TargetDirection	真实瞄准目标的世界单位方向
      * @param ResponseSpeed	指数纠正速率 单位为每秒 越大越快
      * @param DeltaSeconds	本次更新间隔 单位为秒 零间隔不重复积分
@@ -28,7 +28,6 @@ struct FAimIKResponse
         if (!bInitialized)
         {
             Direction = InputDirection;
-            PreviousInputDirection = InputDirection;
             bInitialized = true;
         }
 
@@ -37,11 +36,7 @@ struct FAimIKResponse
             return Direction;
         }
 
-        // 姿势先受到扰动 再由持续的瞄准纠正消除误差
-        const FQuat PoseDelta = FQuat::FindBetweenNormals(PreviousInputDirection, InputDirection);
-        Direction = PoseDelta.RotateVector(Direction).GetSafeNormal();
-        PreviousInputDirection = InputDirection;
-
+        // 只平滑目标方向 当前输入姿势由本帧骨骼求解独立纠正
         const float ResponseAlpha = 1.0f - FMath::Exp(-ResponseSpeed * DeltaSeconds);
         const FQuat Correction = FQuat::FindBetweenNormals(Direction, TargetDirection);
         Direction = FQuat::Slerp(FQuat::Identity, Correction, ResponseAlpha)
@@ -52,9 +47,6 @@ struct FAimIKResponse
 private:
     /** 上一次实际响应方向 */
     FVector Direction = FVector::ForwardVector;
-
-    /** 上一次未经过 IK 的输入姿势方向 */
-    FVector PreviousInputDirection = FVector::ForwardVector;
 
     /** 是否已经取得本轮输入姿势 */
     bool bInitialized = false;

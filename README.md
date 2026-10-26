@@ -29,6 +29,7 @@ AnimBlueprint
     -> FAnimNode_AimIK
         -> 校验输入和缓存骨骼索引
         -> 从当前 Pose 重建瞄准源组件空间变换
+        -> FAimIKResponse 按时间追随世界空间目标方向
         -> FAimIKSolver
             -> 目标钳制
             -> 线性奇点偏移
@@ -46,6 +47,8 @@ const FTransform AimTransformCS = AimSourceLocalTransform * AimSourceBoneTransfo
 ```
 
 `AimSourceLocalTransform` 表示瞄准源相对 `AimSourceBoneName` 的稳定绑定.它应在装备建立绑定时计算 而不是把求解结果作为下一帧输入.
+
+`AimFollowSpeed` 只控制世界空间追随方向靠近真实目标的速度.首次启用从当前输入姿势的朝向开始 后续输入姿势的旋转变化不累积到追随方向.每帧 CCD 仍从当前姿势求解到本帧追随方向.基础动作改变不会额外带动追随状态 目标改变仍保留配置的跟随迟滞.最大迭代次数只控制本帧求解精度 不代替跟随速度.
 
 ## 文件结构
 
@@ -134,7 +137,7 @@ PrivateDependencyModuleNames.AddRange(new string[]
 |---|---|---|---|
 | `Aim Source Local Transform` | Transform | 瞄准源相对 `AimSourceBoneName` 的稳定局部绑定 | 枪口socket对于hand_r的偏移 |
 | `Aim Target` | Vector | Skeletal Mesh 组件空间中的目标位置 | 瞄准目标点对于角色mesh组件空间的坐标 |
-| `Has Valid Aim Target` | Boolean | 当前目标是否有效 | 开关 |
+| `Aim Follow Speed` | Float | 世界空间目标方向的指数追随速率 | 越大追得越快 |
 | `Alpha` | Float | 整个 Skeletal Control 的混合权重 | 瞄准偏移的影响程度 1为完全叠加偏移结果 |
 
 如果目标来自世界空间 先使用当前 Skeletal Mesh 组件的逆变换把目标位置转换到组件空间 再写入动画实例变量.不要把世界空间位置直接连接到 `Aim Target`.

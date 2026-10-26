@@ -90,8 +90,8 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "求解器", meta = (PinShownByDefault, DisplayName = "瞄准目标"))
     FVector AimTarget = FVector::ZeroVector;
 
-    /** 输入姿势受到扰动后朝真实目标纠正的指数速率 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (PinShownByDefault, ClampMin = "0.01", ToolTip = "单位为每秒 越大实际持枪朝向纠正越快 目标保持不变 输入姿势的扰动也参与跨帧响应", DisplayName = "瞄准纠正速率"))
+    /** 世界空间追随方向靠近真实目标方向的指数速率 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (PinShownByDefault, ClampMin = "0.01", ToolTip = "单位为每秒 越大枪口追随目标越快 只平滑世界空间目标方向 不累积输入姿势的旋转变化", DisplayName = "瞄准跟随速度"))
     float AimFollowSpeed = 18.0f;
 
     ////
@@ -138,7 +138,7 @@ private:
     /** 本帧动画更新间隔 */
     float FollowDeltaSeconds = 0.0f;
 
-    /** 输入姿势受扰动后朝真实目标纠正的跨帧响应 */
+    /** 独立于输入姿势变化的世界空间目标追随响应 */
     FAimIKResponse AimResponse;
 
     /** 骨骼链的紧凑姿态索引缓存 */

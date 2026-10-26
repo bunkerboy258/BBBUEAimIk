@@ -3,26 +3,29 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAimIKPoseDisturbanceTest, "BBBAimIK.Response.PoseDisturbance",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAimIKPoseIndependenceTest, "BBBAimIK.Response.PoseIndependence",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAimIKPoseDisturbanceTest::RunTest(const FString& Parameters)
+bool FAimIKPoseIndependenceTest::RunTest(const FString& Parameters)
 {
     FAimIKResponse Response;
+    FAimIKResponse Reference;
     const FVector Target = FVector::ForwardVector;
     Response.Update(Target, Target, 18.0f, 0.0f);
+    Reference.Update(Target, Target, 18.0f, 0.0f);
     const FVector Kicked = FRotator(6.0f, -2.0f, 0.0f).Vector();
     const FVector First = Response.Update(Kicked, Target, 18.0f, 1.0f / 60.0f);
-    TestTrue(TEXT("固定目标下输入姿势扰动不会被当帧消除"), First.Z > 0.01 && First.Y < -0.001);
-    TestTrue(TEXT("纠正后误差小于原始扰动"), FVector::DotProduct(First, Target) > FVector::DotProduct(Kicked, Target));
+    TestTrue(TEXT("固定目标下输入姿势变化不带动追随方向"), First.Equals(Target, 1.e-8));
     const FVector Repeated = Response.Update(Kicked, Target, 18.0f, 0.0f);
     TestTrue(TEXT("同帧再次求值不重复积分"), Repeated.Equals(First, 1.e-8));
-    FVector Result = First;
+    const FVector MovingTarget = FRotator(20.0f, 35.0f, 0.0f).Vector();
     for (int32 Frame = 0; Frame < 60; ++Frame)
     {
-        Result = Response.Update(Kicked, Target, 18.0f, 1.0f / 60.0f);
+        const FVector Pose = FRotator(Frame * 3.0f, Frame * 7.0f, 0.0f).Vector();
+        const FVector Result = Response.Update(Pose, MovingTarget, 18.0f, 1.0f / 60.0f);
+        const FVector Expected = Reference.Update(Target, MovingTarget, 18.0f, 1.0f / 60.0f);
+        TestTrue(TEXT("目标追随过程不受输入姿势变化影响"), Result.Equals(Expected, 1.e-8));
     }
-    TestTrue(TEXT("保持相同输入姿势时持续纠正到真实目标"), Result.Equals(Target, 1.e-6));
     TestTrue(TEXT("输入目标没有被修改"), Target.Equals(FVector::ForwardVector));
     return true;
 }
@@ -38,7 +41,7 @@ bool FAimIKResponseFrameRateTest::RunTest(const FString& Parameters)
         FAimIKResponse Response;
         const FVector Target = FVector::ForwardVector;
         const FVector Input = FRotator(12.0f, 8.0f, 0.0f).Vector();
-        Response.Update(Target, Target, 6.0f, 0.0f);
+        Response.Update(Input, Target, 6.0f, 0.0f);
         FVector Result = Input;
         for (int32 Frame = 0; Frame < Rate; ++Frame)
         {
