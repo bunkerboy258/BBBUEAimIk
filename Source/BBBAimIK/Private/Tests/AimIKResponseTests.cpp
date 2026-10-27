@@ -74,4 +74,29 @@ bool FAimIKResponseResetTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("反向与极点附近结果有限且归一化"), !Opposite.ContainsNaN() && Opposite.IsNormalized());
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAimIKRearTargetContinuityTest, "BBBAimIK.Response.RearTargetContinuity",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAimIKRearTargetContinuityTest::RunTest(const FString& Parameters)
+{
+    FAimIKResponse Response;
+    const FVector Input = FVector::ForwardVector;
+    const FVector RightRear = FRotator(0.0f, 179.0f, 0.0f).Vector();
+    const FVector LeftRear = FRotator(0.0f, -179.0f, 0.0f).Vector();
+    FVector Previous = Input;
+    for (int32 Frame = 0; Frame < 60; ++Frame)
+    {
+        Previous = Response.Update(Input, RightRear, 18.0f, 1.0f / 60.0f, 45.0f);
+    }
+
+    const FVector Current = Response.Update(Input, LeftRear, 18.0f, 1.0f / 60.0f, 45.0f);
+    const float ChangeDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+        FVector::DotProduct(Previous, Current), -1.0f, 1.0f)));
+    const float CorrectionDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+        FVector::DotProduct(Input, Current), -1.0f, 1.0f)));
+    TestTrue(TEXT("目标越过正后方时不会跨圆锥跳边"), ChangeDegrees < 15.0f);
+    TestTrue(TEXT("目标越过正后方时仍遵守四十五度上限"), CorrectionDegrees <= 45.01f);
+    return true;
+}
 #endif
