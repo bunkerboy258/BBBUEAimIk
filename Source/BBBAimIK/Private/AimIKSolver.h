@@ -47,8 +47,11 @@ struct FAimIKSolverInput
     /** 提前停止迭代的最小角度误差 单位为度 */
     float Tolerance = 0.0f;
 
-    /** 求解目标相对输入姿态瞄准前向的最大角度 */
-    float MaxAimCorrectionAngleDegrees = 45.0f;
+    /** 求解目标相对输入姿态的最大水平偏角 */
+    float MaxHorizontalAimCorrectionAngleDegrees = 60.0f;
+
+    /** 求解目标相对输入姿态的最大垂直偏角 */
+    float MaxVerticalAimCorrectionAngleDegrees = 90.0f;
 };
 
 /**

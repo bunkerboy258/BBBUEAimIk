@@ -94,9 +94,13 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (PinShownByDefault, ClampMin = "0.01", ToolTip = "单位为每秒 越大枪口追随目标越快 超过最大修正角度时追随方向会移到角度边界", DisplayName = "瞄准跟随速度"))
     float AimFollowSpeed = 18.0f;
 
-    /** 相对当前输入姿态瞄准前向允许的最大修正角度 单位为度 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (ClampMin = "1.0", ClampMax = "180.0", UIMin = "1.0", UIMax = "180.0", ToolTip = "限制本帧 Aim IK 目标方向与输入姿态瞄准前向的夹角 180 度不限制", DisplayName = "最大瞄准修正角度"))
-    float MaxAimCorrectionAngleDegrees = 45.0f;
+    /** 相对当前输入姿态允许的最大水平瞄准偏角 单位为度 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (ClampMin = "1.0", ClampMax = "180.0", UIMin = "1.0", UIMax = "180.0", ToolTip = "限制 Aim IK 相对当前输入姿态的水平偏角 180 度不限制", DisplayName = "最大水平瞄准修正角度"))
+    float MaxHorizontalAimCorrectionAngleDegrees = 60.0f;
+
+    /** 相对当前输入姿态允许的最大垂直瞄准偏角 单位为度 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (ClampMin = "1.0", ClampMax = "180.0", UIMin = "1.0", UIMax = "180.0", ToolTip = "限制 Aim IK 相对当前输入姿态的垂直偏角 180 度不限制", DisplayName = "最大垂直瞄准修正角度"))
+    float MaxVerticalAimCorrectionAngleDegrees = 90.0f;
 
     ////
 

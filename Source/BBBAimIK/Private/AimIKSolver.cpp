@@ -37,7 +37,10 @@ FVector FAimIKSolver::Solve(
     const FVector LimitedDirection = FAimIKAngleLimit::ClampDirection(
         InitialAimForwardCS,
         ToClampedTarget,
-        Input.MaxAimCorrectionAngleDegrees,
+        FVector::UpVector,
+        FVector::ForwardVector,
+        Input.MaxHorizontalAimCorrectionAngleDegrees,
+        Input.MaxVerticalAimCorrectionAngleDegrees,
         Input.AimTargetCS - InitialAimPositionCS);
     const FVector SolveTargetCS = LimitedDirection.IsNearlyZero()
         ? ClampedTargetCS

@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "AimIKAngleLimit.h"
 
-/** 按时间追随目标并相对输入姿势限制最大偏角的世界空间朝向 */
+/** 按时间追随目标并分别限制水平与垂直偏角的世界空间朝向 */
 struct FAimIKResponse
 {
     /**
@@ -19,13 +19,18 @@ struct FAimIKResponse
      * 从首次输入姿势开始按时间连续追随真实目标 超出角度上限时将状态移到边界
      * @param InputDirection	当前输入姿势的世界单位朝向
      * @param TargetDirection	真实瞄准目标的世界单位方向
+     * @param UpDirection	角色组件的世界竖直方向
+     * @param ReferenceForward	输入方向竖直时使用的角色组件世界前向
      * @param ResponseSpeed	指数纠正速率 单位为每秒 越大越快
      * @param DeltaSeconds	本次更新间隔 单位为秒 零间隔不重复积分
-     * @param MaxAngleDegrees	相对当前输入姿势允许的最大修正角度
+     * @param MaxHorizontalAngleDegrees	相对当前输入姿势允许的最大水平偏角
+     * @param MaxVerticalAngleDegrees	相对当前输入姿势允许的最大垂直偏角
      * @return 本帧实际响应的世界单位方向 不修改目标
      */
     FVector Update(const FVector& InputDirection, const FVector& TargetDirection,
-        float ResponseSpeed, float DeltaSeconds, float MaxAngleDegrees)
+        const FVector& UpDirection, const FVector& ReferenceForward,
+        float ResponseSpeed, float DeltaSeconds,
+        float MaxHorizontalAngleDegrees, float MaxVerticalAngleDegrees)
     {
         if (!bInitialized)
         {
@@ -37,9 +42,10 @@ struct FAimIKResponse
         const FVector PreviousSide = FVector::CrossProduct(InputDirection, Direction).IsNearlyZero()
             ? PreviousInputDirection
             : Direction;
-        const FVector PreviousWithinCone = FAimIKAngleLimit::ClampDirection(
-            InputDirection, Direction, MaxAngleDegrees, PreviousSide);
-        Direction = PreviousWithinCone;
+        const FVector PreviousWithinLimits = FAimIKAngleLimit::ClampDirection(
+            InputDirection, Direction, UpDirection, ReferenceForward,
+            MaxHorizontalAngleDegrees, MaxVerticalAngleDegrees, PreviousSide);
+        Direction = PreviousWithinLimits;
         float ResponseAlpha = 0.0f;
         if (DeltaSeconds > 0.0f)
         {
@@ -50,11 +56,12 @@ struct FAimIKResponse
             if (TargetDot < -1.0f + KINDA_SMALL_NUMBER)
             {
                 // 正后方没有唯一转向侧 优先绕世界竖直轴转向
-                FVector TurnAxis = FVector::UpVector
-                    - Direction * FVector::DotProduct(FVector::UpVector, Direction);
+                FVector TurnAxis = UpDirection
+                    - Direction * FVector::DotProduct(UpDirection, Direction);
                 if (TurnAxis.IsNearlyZero())
                 {
-                    TurnAxis = FVector::RightVector;
+                    TurnAxis = ReferenceForward
+                        - Direction * FVector::DotProduct(ReferenceForward, Direction);
                 }
                 Correction = FQuat(TurnAxis.GetSafeNormal(), UE_PI);
             }
@@ -64,21 +71,26 @@ struct FAimIKResponse
 
         // 上限触发时同步更新保存的方向 避免下一帧继续追赶过旧的状态
         const FVector LimitedCandidate = FAimIKAngleLimit::ClampDirection(
-            InputDirection, Direction, MaxAngleDegrees, PreviousWithinCone);
+            InputDirection, Direction, UpDirection, ReferenceForward,
+            MaxHorizontalAngleDegrees, MaxVerticalAngleDegrees, PreviousWithinLimits);
         const float DirectionChange = FMath::Acos(FMath::Clamp(
-            FVector::DotProduct(PreviousWithinCone, LimitedCandidate), -1.0f, 1.0f));
-        if (DirectionChange > FMath::DegreesToRadians(MaxAngleDegrees))
+            FVector::DotProduct(PreviousWithinLimits, LimitedCandidate), -1.0f, 1.0f));
+        if (DirectionChange > FMath::DegreesToRadians(
+            FMath::Min(MaxHorizontalAngleDegrees, MaxVerticalAngleDegrees)))
         {
-            // 目标跨越圆锥两侧时沿圆锥内的短弧平滑过渡
+            // 目标跨越水平或垂直边界时沿短弧平滑过渡
             const FQuat Step = FQuat::FindBetweenNormals(
-                PreviousWithinCone, LimitedCandidate);
+                PreviousWithinLimits, LimitedCandidate);
             Direction = FQuat::Slerp(FQuat::Identity, Step, ResponseAlpha)
-                .RotateVector(PreviousWithinCone).GetSafeNormal();
+                .RotateVector(PreviousWithinLimits).GetSafeNormal();
         }
         else
         {
             Direction = LimitedCandidate;
         }
+        Direction = FAimIKAngleLimit::ClampDirection(
+            InputDirection, Direction, UpDirection, ReferenceForward,
+            MaxHorizontalAngleDegrees, MaxVerticalAngleDegrees, PreviousWithinLimits);
         PreviousInputDirection = InputDirection.GetSafeNormal();
         return Direction;
     }

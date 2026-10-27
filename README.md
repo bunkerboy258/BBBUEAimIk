@@ -29,11 +29,11 @@ AnimBlueprint
     -> FAnimNode_AimIK
         -> 校验输入和缓存骨骼索引
         -> 从当前 Pose 重建瞄准源组件空间变换
-        -> FAimIKResponse 按时间追随世界空间目标方向 并限制相对输入姿态的角度
+        -> FAimIKResponse 按时间追随世界空间目标方向 并分别限制水平与垂直偏角
         -> FAimIKSolver
             -> 线性奇点偏移
             -> 目标钳制
-            -> 最大求解目标角度限制
+            -> 水平与垂直求解目标角度限制
             -> CCD 迭代
             -> 极轴纠偏
         -> 输出排序后的 FBoneTransform
@@ -49,9 +49,9 @@ const FTransform AimTransformCS = AimSourceLocalTransform * AimSourceBoneTransfo
 
 `AimSourceLocalTransform` 表示瞄准源相对 `AimSourceBoneName` 的稳定绑定.它应在装备建立绑定时计算 而不是把求解结果作为下一帧输入.
 
-`AimFollowSpeed` 控制世界空间追随方向靠近真实目标的速度.首次启用从当前输入姿势的朝向开始.在最大修正角度内 后续输入姿势的旋转变化不累积到追随方向;超过上限时 追随状态会移到当前输入姿势周围的角度边界 避免持续追赶过旧方向.每帧 CCD 仍从当前姿势求解.最大迭代次数只控制本帧求解精度 不代替跟随速度或角度上限.
+`AimFollowSpeed` 控制世界空间追随方向靠近真实目标的速度.首次启用从当前输入姿势的朝向开始.在允许的水平和垂直偏角内 后续输入姿势的旋转变化不累积到追随方向;超过任一上限时 追随状态会移到对应边界 避免持续追赶过旧方向.每帧 CCD 仍从当前姿势求解.最大迭代次数只控制本帧求解精度 不代替跟随速度或角度上限.
 
-目标接近正后方时 角度限制沿用上一帧的转向侧 避免目标跨过 180 度边界时从圆锥一侧跳到另一侧.这一限制只作用于 Aim IK 的求解方向;角色根骨骼的旋转偏移仍需在所属动画蓝图中单独设限.
+目标接近正后方时 水平限制沿用上一帧的转向侧 避免目标跨过 180 度边界时突然反向.两个偏角都相对当前输入姿态计算 水平以角色组件的上方向为轴 垂直以该上方向的仰角差计算.这一限制只作用于 Aim IK 的求解方向;角色根骨骼的旋转偏移仍需在所属动画蓝图中单独设限.
 
 ## 文件结构
 
@@ -144,7 +144,8 @@ PrivateDependencyModuleNames.AddRange(new string[]
 | `Aim Source Local Transform` | Transform | 瞄准源相对 `AimSourceBoneName` 的稳定局部绑定 | 枪口socket对于hand_r的偏移 |
 | `Aim Target` | Vector | Skeletal Mesh 组件空间中的目标位置 | 瞄准目标点对于角色mesh组件空间的坐标 |
 | `Aim Follow Speed` | Float | 世界空间目标方向的指数追随速率 | 越大追得越快 |
-| `Max Aim Correction Angle Degrees` | Float | 当前输入姿态瞄准前向与求解目标之间的最大夹角 | 默认 45 度 |
+| `Max Horizontal Aim Correction Angle Degrees` | Float | 相对当前输入姿态的最大水平偏角 | 默认 60 度 |
+| `Max Vertical Aim Correction Angle Degrees` | Float | 相对当前输入姿态的最大垂直仰角差 | 默认 90 度 |
 | `Alpha` | Float | 整个 Skeletal Control 的混合权重 | 瞄准偏移的影响程度 1为完全叠加偏移结果 |
 
 如果目标来自世界空间 先使用当前 Skeletal Mesh 组件的逆变换把目标位置转换到组件空间 再写入动画实例变量.不要把世界空间位置直接连接到 `Aim Target`.
@@ -165,7 +166,8 @@ PrivateDependencyModuleNames.AddRange(new string[]
 | `AimSourceBoneName` | `None` | 承载虚拟瞄准源的骨骼 |
 | `AimSourceLocalTransform` | Identity | 瞄准源相对承载骨骼的稳定局部变换 |
 | `AimAxis` | `(1, 0, 0)` | 应朝向目标的局部轴 |
-| `MaxAimCorrectionAngleDegrees` | `45` | 相对当前输入姿态瞄准前向的最大目标角度 单位为度 180 表示不限制 |
+| `MaxHorizontalAimCorrectionAngleDegrees` | `60` | 相对当前输入姿态的最大水平偏角 单位为度 180 表示不限制 |
+| `MaxVerticalAimCorrectionAngleDegrees` | `90` | 相对当前输入姿态的最大垂直仰角差 单位为度 180 表示不限制 |
 
 ### Solver
 
