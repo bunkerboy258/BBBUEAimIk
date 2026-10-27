@@ -29,10 +29,11 @@ AnimBlueprint
     -> FAnimNode_AimIK
         -> 校验输入和缓存骨骼索引
         -> 从当前 Pose 重建瞄准源组件空间变换
-        -> FAimIKResponse 按时间追随世界空间目标方向
+        -> FAimIKResponse 按时间追随世界空间目标方向 并限制相对输入姿态的角度
         -> FAimIKSolver
-            -> 目标钳制
             -> 线性奇点偏移
+            -> 目标钳制
+            -> 最大求解目标角度限制
             -> CCD 迭代
             -> 极轴纠偏
         -> 输出排序后的 FBoneTransform
@@ -48,7 +49,7 @@ const FTransform AimTransformCS = AimSourceLocalTransform * AimSourceBoneTransfo
 
 `AimSourceLocalTransform` 表示瞄准源相对 `AimSourceBoneName` 的稳定绑定.它应在装备建立绑定时计算 而不是把求解结果作为下一帧输入.
 
-`AimFollowSpeed` 只控制世界空间追随方向靠近真实目标的速度.首次启用从当前输入姿势的朝向开始 后续输入姿势的旋转变化不累积到追随方向.每帧 CCD 仍从当前姿势求解到本帧追随方向.基础动作改变不会额外带动追随状态 目标改变仍保留配置的跟随迟滞.最大迭代次数只控制本帧求解精度 不代替跟随速度.
+`AimFollowSpeed` 控制世界空间追随方向靠近真实目标的速度.首次启用从当前输入姿势的朝向开始.在最大修正角度内 后续输入姿势的旋转变化不累积到追随方向;超过上限时 追随状态会移到当前输入姿势周围的角度边界 避免持续追赶过旧方向.每帧 CCD 仍从当前姿势求解.最大迭代次数只控制本帧求解精度 不代替跟随速度或角度上限.
 
 ## 文件结构
 
@@ -60,6 +61,8 @@ BBBAimIK/
     ├── BBBAimIK/
     │   ├── BBBAimIK.Build.cs
     │   ├── Public/
+    │   │   ├── AimIKAngleLimit.h
+    │   │   ├── AimIKResponse.h
     │   │   └── AnimNode_AimIK.h
     │   └── Private/
     │       ├── AimIKBoneHierarchy.h
@@ -81,6 +84,7 @@ BBBAimIK/
 - `AnimNode_AimIK`:公开配置 动画节点生命周期 骨骼缓存 诊断和结果输出.
 - `AimIKSolver`:不依赖编辑器模块的组件空间 CCD 求解.
 - `AimIKBoneHierarchy`:集中处理瞄准源与链尖端之间的层级判断.
+- `AimIKAngleLimit`:响应和求解器共用的目标方向角度限制.
 - `AnimGraphNode_AimIK`:节点菜单 显示信息和编译期配置警告.
 
 ## 安装
@@ -138,6 +142,7 @@ PrivateDependencyModuleNames.AddRange(new string[]
 | `Aim Source Local Transform` | Transform | 瞄准源相对 `AimSourceBoneName` 的稳定局部绑定 | 枪口socket对于hand_r的偏移 |
 | `Aim Target` | Vector | Skeletal Mesh 组件空间中的目标位置 | 瞄准目标点对于角色mesh组件空间的坐标 |
 | `Aim Follow Speed` | Float | 世界空间目标方向的指数追随速率 | 越大追得越快 |
+| `Max Aim Correction Angle Degrees` | Float | 当前输入姿态瞄准前向与求解目标之间的最大夹角 | 默认 45 度 |
 | `Alpha` | Float | 整个 Skeletal Control 的混合权重 | 瞄准偏移的影响程度 1为完全叠加偏移结果 |
 
 如果目标来自世界空间 先使用当前 Skeletal Mesh 组件的逆变换把目标位置转换到组件空间 再写入动画实例变量.不要把世界空间位置直接连接到 `Aim Target`.
@@ -158,6 +163,7 @@ PrivateDependencyModuleNames.AddRange(new string[]
 | `AimSourceBoneName` | `None` | 承载虚拟瞄准源的骨骼 |
 | `AimSourceLocalTransform` | Identity | 瞄准源相对承载骨骼的稳定局部变换 |
 | `AimAxis` | `(1, 0, 0)` | 应朝向目标的局部轴 |
+| `MaxAimCorrectionAngleDegrees` | `45` | 相对当前输入姿态瞄准前向的最大目标角度 单位为度 180 表示不限制 |
 
 ### Solver
 
@@ -172,6 +178,8 @@ PrivateDependencyModuleNames.AddRange(new string[]
 启停与混合统一使用继承的 `Alpha` 输入 不再提供独立目标有效性开关.调用方负责在目标或瞄准来源不可用时将最终有效权重立即设为零;若使用 Alpha 插值或 Bool 淡出 需要保证淡出期间输入仍然有效.世界原点和组件空间零向量均可作为合法目标 不能用零向量表示"无目标".
 
 节点保留骨骼层级 非法变换 非有限目标 零方向和最小距离等算法防呆.上一轮权重为零后 恢复求解前会清空输入姿态诊断历史 避免把停用期间的位移误报为跳变.
+
+最大修正角度限制求解目标方向 并不逐节限制骨骼旋转.快速转向触及上限时 枪口可能暂时落后于准星;项目子弹仍按本机枪口正前方发射.
 
 | 参数 | 默认值 | 说明 |
 |---|---:|---|

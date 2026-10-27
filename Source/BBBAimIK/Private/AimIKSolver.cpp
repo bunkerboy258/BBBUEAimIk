@@ -1,4 +1,5 @@
 #include "AimIKSolver.h"
+#include "AimIKAngleLimit.h"
 
 FVector FAimIKSolver::Solve(
     const FAimIKSolverInput& Input,
@@ -32,6 +33,14 @@ FVector FAimIKSolver::Solve(
         InitialAimPositionCS,
         InitialAimForwardCS,
         EffectiveTargetCS);
+    const FVector ToClampedTarget = ClampedTargetCS - InitialAimPositionCS;
+    const FVector LimitedDirection = FAimIKAngleLimit::ClampDirection(
+        InitialAimForwardCS,
+        ToClampedTarget,
+        Input.MaxAimCorrectionAngleDegrees);
+    const FVector SolveTargetCS = LimitedDirection.IsNearlyZero()
+        ? ClampedTargetCS
+        : InitialAimPositionCS + LimitedDirection * ToClampedTarget.Size();
     const int32 IterationCount = FMath::Clamp(Input.MaxIterations, 1, 20);
 
     for (int32 IterationIndex = 0; IterationIndex < IterationCount; ++IterationIndex)
@@ -47,7 +56,7 @@ FVector FAimIKSolver::Solve(
             RotateBoneToTarget(
                 Input,
                 ChainIndex,
-                ClampedTargetCS,
+                SolveTargetCS,
                 Weight,
                 InOutChainTransforms,
                 InOutAimTransformCS);
@@ -61,7 +70,7 @@ FVector FAimIKSolver::Solve(
 
         // 计算当前瞄准前向与目标方向的夹角 达到容差即提前结束迭代
         const FVector CurrentAimForwardCS = InOutAimTransformCS.TransformVectorNoScale(Input.AimAxis).GetSafeNormal();
-        const FVector ToTargetDirection = (ClampedTargetCS - InOutAimTransformCS.GetLocation()).GetSafeNormal();
+        const FVector ToTargetDirection = (SolveTargetCS - InOutAimTransformCS.GetLocation()).GetSafeNormal();
         if (ToTargetDirection.IsNearlyZero())
         {
             continue;
@@ -78,7 +87,7 @@ FVector FAimIKSolver::Solve(
         }
     }
 
-    return ClampedTargetCS;
+    return SolveTargetCS;
 }
 
 //------------------------------------------------------------------------------

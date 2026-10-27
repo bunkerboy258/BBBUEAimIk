@@ -333,8 +333,11 @@ void FAnimNode_AimIK::SolveAimIK(
     const FVector TargetDelta = AimTarget - AimTransformCS.GetLocation();
     const double TargetDistance = TargetDelta.Size();
     if (!ensureMsgf(FMath::IsFinite(AimFollowSpeed) && AimFollowSpeed > 0.0f
+        && FMath::IsFinite(MaxAimCorrectionAngleDegrees)
+        && MaxAimCorrectionAngleDegrees >= 1.0f
+        && MaxAimCorrectionAngleDegrees <= 180.0f
         && FMath::IsFinite(TargetDistance) && TargetDistance > UE_SMALL_NUMBER,
-        TEXT("AimIK 纠正速率或目标距离无效")))
+        TEXT("AimIK 纠正速率 最大修正角度或目标距离无效")))
     {
         AimResponse.Reset();
         return;
@@ -343,7 +346,8 @@ void FAnimNode_AimIK::SolveAimIK(
     const FVector TargetDirectionWorld = ComponentTransform.TransformVectorNoScale(TargetDelta / TargetDistance).GetSafeNormal();
     const FVector InputDirectionWorld = ComponentTransform.TransformVectorNoScale(AimForwardCS).GetSafeNormal();
     const FVector ResponseDirectionWorld = AimResponse.Update(
-        InputDirectionWorld, TargetDirectionWorld, AimFollowSpeed, FollowDeltaSeconds);
+        InputDirectionWorld, TargetDirectionWorld, AimFollowSpeed, FollowDeltaSeconds,
+        MaxAimCorrectionAngleDegrees);
     FollowDeltaSeconds = 0.0f;
     const FVector Direction = ComponentTransform.InverseTransformVectorNoScale(ResponseDirectionWorld).GetSafeNormal();
     SolverInput.AimTargetCS = AimTransformCS.GetLocation()
@@ -355,6 +359,7 @@ void FAnimNode_AimIK::SolveAimIK(
     SolverInput.ClampSmoothing = ClampSmoothing;
     SolverInput.MaxIterations = MaxIterations;
     SolverInput.Tolerance = Tolerance;
+    SolverInput.MaxAimCorrectionAngleDegrees = MaxAimCorrectionAngleDegrees;
 
     const FVector EffectiveTargetCS = FAimIKSolver::Solve(
         SolverInput,
