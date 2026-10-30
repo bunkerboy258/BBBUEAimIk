@@ -51,7 +51,9 @@ const FTransform AimTransformCS = AimSourceLocalTransform * AimSourceBoneTransfo
 
 `AimFollowSpeed` 控制世界空间追随方向靠近真实目标的速度.首次启用从当前输入姿势的朝向开始.在允许的水平和垂直偏角内 后续输入姿势的旋转变化不累积到追随方向;超过任一上限时 追随状态会移到对应边界 避免持续追赶过旧方向.每帧 CCD 仍从当前姿势求解.最大迭代次数只控制本帧求解精度 不代替跟随速度或角度上限.
 
-目标接近正后方时 水平限制沿用上一帧的转向侧 避免目标跨过 180 度边界时突然反向.两个偏角都相对当前输入姿态计算 水平以角色组件的上方向为轴 垂直以该上方向的仰角差计算.这一限制只作用于 Aim IK 的求解方向;角色根骨骼的旋转偏移仍需在所属动画蓝图中单独设限.
+目标接近正后方时 水平限制沿用上一响应可确定的转向侧 避免目标跨过 180 度边界时突然反向.安全距离 方向响应 目标软钳制和角度限制统一使用求解前瞄准源参考系.参考前向来自 AimAxis 参考上向来自 AimUpAxis 正交化后共同定义左右与上下.组件变换只转换坐标 不再提供隐含参考轴.瞄准源侧倾时限制平面随之侧倾.
+
+2026-10-30 源码重构: 新增 FAimIKReferenceFrame 和 AimUpAxis 移除目标响应及软钳制中的三维短弧路径.世界方向历史只在节点中保存一份 同次求解不根据输出姿势重建参考系.骨链旋转与可选极轴纠偏仍使用四元数.新增参考轴有效性 源与目标整体旋转 等时长响应 背后连续性 重置与求解器目标检查.UE5.8 Development Editor 构建通过 六项原生检查通过.项目 FAL 完成 480 帧静止与转向及 780 帧移动 蹲姿 俯仰 射击 换弹短回归 输入释放与时钟恢复均确认.最终画面由用户验收 低持枪左手不可达仍待后续处理.
 
 ## 文件结构
 
@@ -64,6 +66,7 @@ BBBAimIK/
     │   ├── BBBAimIK.Build.cs
     │   ├── Public/
     │   │   ├── AimIKAngleLimit.h
+    │   │   ├── AimIKReferenceFrame.h
     │   │   ├── AimIKResponse.h
     │   │   └── AnimNode_AimIK.h
     │   └── Private/
@@ -87,6 +90,7 @@ BBBAimIK/
 - `AimIKSolver`:不依赖编辑器模块的组件空间 CCD 求解.
 - `AimIKBoneHierarchy`:集中处理瞄准源与链尖端之间的层级判断.
 - `AimIKAngleLimit`:响应和求解器共用的目标方向角度限制.
+- `AimIKReferenceFrame`:从输入瞄准源建立正交参考系 集中处理坐标与角度转换.
 - `AnimGraphNode_AimIK`:节点菜单 显示信息和编译期配置警告.
 
 ## 安装
@@ -154,6 +158,7 @@ PrivateDependencyModuleNames.AddRange(new string[]
 
 - `AimAxis` 是瞄准源局部空间中指向前方的轴 默认是 `X+`.
 - `PoleAxis` 是瞄准源局部空间中用于约束翻转的参考轴 默认是 `Z+`.
+- `AimUpAxis` 是瞄准源局部参考上轴 默认是 `Z+` 不得与 AimAxis 共线 不受 PoleWeight 控制.
 - `PoleTarget` 和 `AimTarget` 一样使用组件空间.
 - 不需要极轴约束时 将 `PoleWeight` 保持为 `0`.
 
@@ -167,7 +172,7 @@ PrivateDependencyModuleNames.AddRange(new string[]
 | `AimSourceLocalTransform` | Identity | 瞄准源相对承载骨骼的稳定局部变换 |
 | `AimAxis` | `(1, 0, 0)` | 应朝向目标的局部轴 |
 | `MaxHorizontalAimCorrectionAngleDegrees` | `60` | 相对当前输入姿态的最大水平偏角 单位为度 180 表示不限制 |
-| `MaxVerticalAimCorrectionAngleDegrees` | `90` | 相对当前输入姿态的最大垂直仰角差 单位为度 180 表示不限制 |
+| `MaxVerticalAimCorrectionAngleDegrees` | `90` | 瞄准源参考系中的最大俯仰角 单位为度 90 覆盖完整俯仰范围 |
 
 ### Solver
 

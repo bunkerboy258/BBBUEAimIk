@@ -300,15 +300,22 @@ void FAnimNode_AimIK::SolveAimIK(
 
     // 由承载骨骼与稳定局部变换重建瞄准源的组件空间变换
     FTransform AimTransformCS = AimSourceLocalTransform * AimSourceBoneTransformCS;
+    FAimIKReferenceFrame ReferenceFrameCS;
+    if (!ensureMsgf(FAimIKReferenceFrame::TryCreate(AimTransformCS, AimAxis, AimUpAxis, ReferenceFrameCS),
+        TEXT("AimIK 瞄准源参考系无效 请检查局部变换 瞄准轴及参考上轴")))
+    {
+        AimResponse.Reset();
+        return;
+    }
     if (bEnableMinTargetDistanceGuard
-        && FVector::Dist(AimTransformCS.GetLocation(), AimTarget) <= MinTargetDistance)
+        && FVector::Dist(ReferenceFrameCS.Origin, AimTarget) <= MinTargetDistance)
     {
         // 目标距离过近时放弃求解 防止目标方向退化
         AimResponse.Reset();
         return;
     }
 
-    const FVector AimForwardCS = AimTransformCS.TransformVectorNoScale(AimAxis).GetSafeNormal();
+    const FVector AimForwardCS = ReferenceFrameCS.Forward;
     if (AimForwardCS.IsNearlyZero())
     {
         AimResponse.Reset();
@@ -328,6 +335,7 @@ void FAnimNode_AimIK::SolveAimIK(
     }
 
     FAimIKSolverInput SolverInput(BoneChain);
+    SolverInput.ReferenceFrameCS = ReferenceFrameCS;
     SolverInput.AimAxis = AimAxis;
     const FTransform ComponentTransform = Output.AnimInstanceProxy->GetComponentTransform();
     const FVector TargetDelta = AimTarget - AimTransformCS.GetLocation();
@@ -347,11 +355,9 @@ void FAnimNode_AimIK::SolveAimIK(
     }
 
     const FVector TargetDirectionWorld = ComponentTransform.TransformVectorNoScale(TargetDelta / TargetDistance).GetSafeNormal();
-    const FVector InputDirectionWorld = ComponentTransform.TransformVectorNoScale(AimForwardCS).GetSafeNormal();
-    const FVector UpDirectionWorld = ComponentTransform.TransformVectorNoScale(FVector::UpVector).GetSafeNormal();
-    const FVector ReferenceForwardWorld = ComponentTransform.TransformVectorNoScale(FVector::ForwardVector).GetSafeNormal();
+    const FAimIKReferenceFrame ReferenceFrameWorld = ReferenceFrameCS.TransformBy(ComponentTransform);
     const FVector ResponseDirectionWorld = AimResponse.Update(
-        InputDirectionWorld, TargetDirectionWorld, UpDirectionWorld, ReferenceForwardWorld,
+        ReferenceFrameWorld, TargetDirectionWorld,
         AimFollowSpeed, FollowDeltaSeconds,
         MaxHorizontalAimCorrectionAngleDegrees, MaxVerticalAimCorrectionAngleDegrees);
     FollowDeltaSeconds = 0.0f;

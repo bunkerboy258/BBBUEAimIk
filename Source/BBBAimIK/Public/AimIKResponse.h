@@ -1,107 +1,55 @@
 #pragma once
 
-#include "CoreMinimal.h"
 #include "AimIKAngleLimit.h"
 
-/** 按时间追随目标并分别限制水平与垂直偏角的世界空间朝向 */
-struct FAimIKResponse
+/** 使用瞄准源参考系响应目标 世界方向历史由节点独立持有 */
+struct FAimIKResponse final
 {
-    /**
-     * 清除上一轮响应 在重新启用时从当前输入姿势开始
-     * @return 无
-     */
+    /** @return 清除历史 下次从当前输入瞄准源前向开始 */
     void Reset()
     {
         bInitialized = false;
     }
 
     /**
-     * 从首次输入姿势开始按时间连续追随真实目标 超出角度上限时将状态移到边界
-     * @param InputDirection	当前输入姿势的世界单位朝向
-     * @param TargetDirection	真实瞄准目标的世界单位方向
-     * @param UpDirection	角色组件的世界竖直方向
-     * @param ReferenceForward	输入方向竖直时使用的角色组件世界前向
-     * @param ResponseSpeed	指数纠正速率 单位为每秒 越大越快
-     * @param DeltaSeconds	本次更新间隔 单位为秒 零间隔不重复积分
-     * @param MaxHorizontalAngleDegrees	相对当前输入姿势允许的最大水平偏角
-     * @param MaxVerticalAngleDegrees	相对当前输入姿势允许的最大垂直偏角
-     * @return 本帧实际响应的世界单位方向 不修改目标
+     * 在同一参考系中分别响应水平与俯仰目标
+     * @param FrameWorld	求解前瞄准源的世界参考系
+     * @param TargetDirectionWorld	真实目标的世界单位方向
+     * @param ResponseSpeed	指数响应速率 单位为每秒
+     * @param DeltaSeconds	仅消费一次的动画更新时间
+     * @param HorizontalDegrees	相对瞄准源允许的最大水平偏角
+     * @param VerticalDegrees	相对瞄准源允许的最大垂直偏角
+     * @return 本次实际响应的世界单位方向 不修改输入目标
      */
-    FVector Update(const FVector& InputDirection, const FVector& TargetDirection,
-        const FVector& UpDirection, const FVector& ReferenceForward,
-        float ResponseSpeed, float DeltaSeconds,
-        float MaxHorizontalAngleDegrees, float MaxVerticalAngleDegrees)
+    FVector Update(const FAimIKReferenceFrame& FrameWorld, const FVector& TargetDirectionWorld,
+        float ResponseSpeed, float DeltaSeconds, float HorizontalDegrees, float VerticalDegrees)
     {
         if (!bInitialized)
         {
-            Direction = InputDirection.GetSafeNormal();
-            PreviousInputDirection = Direction;
+            DirectionWorld = FrameWorld.Forward;
             bInitialized = true;
         }
 
-        const FVector PreviousSide = FVector::CrossProduct(InputDirection, Direction).IsNearlyZero()
-            ? PreviousInputDirection
-            : Direction;
-        const FVector PreviousWithinLimits = FAimIKAngleLimit::ClampDirection(
-            InputDirection, Direction, UpDirection, ReferenceForward,
-            MaxHorizontalAngleDegrees, MaxVerticalAngleDegrees, PreviousSide);
-        Direction = PreviousWithinLimits;
-        float ResponseAlpha = 0.0f;
-        if (DeltaSeconds > 0.0f)
-        {
-            // 只平滑目标方向 当前输入姿势由本帧骨骼求解独立纠正
-            ResponseAlpha = 1.0f - FMath::Exp(-ResponseSpeed * DeltaSeconds);
-            const float TargetDot = FVector::DotProduct(Direction, TargetDirection);
-            FQuat Correction = FQuat::FindBetweenNormals(Direction, TargetDirection);
-            if (TargetDot < -1.0f + KINDA_SMALL_NUMBER)
-            {
-                // 正后方没有唯一转向侧 优先绕世界竖直轴转向
-                FVector TurnAxis = UpDirection
-                    - Direction * FVector::DotProduct(UpDirection, Direction);
-                if (TurnAxis.IsNearlyZero())
-                {
-                    TurnAxis = ReferenceForward
-                        - Direction * FVector::DotProduct(ReferenceForward, Direction);
-                }
-                Correction = FQuat(TurnAxis.GetSafeNormal(), UE_PI);
-            }
-            Direction = FQuat::Slerp(FQuat::Identity, Correction, ResponseAlpha)
-                .RotateVector(Direction).GetSafeNormal();
-        }
+        // NOTE: 重大技术路线修正 参考系统一来自输入瞄准源 禁止重新混入组件轴或三维短弧追随
+        const FVector2D Limits = FAimIKAngleLimit::GetLimits(HorizontalDegrees, VerticalDegrees);
+        FVector2D Previous = FrameWorld.ToAngles(DirectionWorld);
+        Previous.X = FMath::Clamp(Previous.X, -Limits.X, Limits.X);
+        Previous.Y = FMath::Clamp(Previous.Y, -Limits.Y, Limits.Y);
+        FVector2D Desired = FrameWorld.ToAngles(TargetDirectionWorld, Previous.X);
+        Desired.X = FAimIKAngleLimit::ResolveYaw(Desired.X, Previous.X, Limits.X);
+        Desired.Y = FMath::Clamp(Desired.Y, -Limits.Y, Limits.Y);
 
-        // 上限触发时同步更新保存的方向 避免下一帧继续追赶过旧的状态
-        const FVector LimitedCandidate = FAimIKAngleLimit::ClampDirection(
-            InputDirection, Direction, UpDirection, ReferenceForward,
-            MaxHorizontalAngleDegrees, MaxVerticalAngleDegrees, PreviousWithinLimits);
-        const float DirectionChange = FMath::Acos(FMath::Clamp(
-            FVector::DotProduct(PreviousWithinLimits, LimitedCandidate), -1.0f, 1.0f));
-        if (DirectionChange > FMath::DegreesToRadians(
-            FMath::Min(MaxHorizontalAngleDegrees, MaxVerticalAngleDegrees)))
-        {
-            // 目标跨越水平或垂直边界时沿短弧平滑过渡
-            const FQuat Step = FQuat::FindBetweenNormals(
-                PreviousWithinLimits, LimitedCandidate);
-            Direction = FQuat::Slerp(FQuat::Identity, Step, ResponseAlpha)
-                .RotateVector(PreviousWithinLimits).GetSafeNormal();
-        }
-        else
-        {
-            Direction = LimitedCandidate;
-        }
-        Direction = FAimIKAngleLimit::ClampDirection(
-            InputDirection, Direction, UpDirection, ReferenceForward,
-            MaxHorizontalAngleDegrees, MaxVerticalAngleDegrees, PreviousWithinLimits);
-        PreviousInputDirection = InputDirection.GetSafeNormal();
-        return Direction;
+        const double Alpha = DeltaSeconds > 0.0f
+            ? 1.0 - FMath::Exp(-static_cast<double>(ResponseSpeed) * DeltaSeconds)
+            : 0.0;
+        DirectionWorld = FrameWorld.FromAngles(Previous + (Desired - Previous) * Alpha);
+        return DirectionWorld;
     }
 
 private:
-    /** 上一次实际响应方向 */
-    FVector Direction = FVector::ForwardVector;
+    /** 上次实际输出的世界方向 不随本帧参考骨重复旋转 */
+    FVector DirectionWorld = FVector::ForwardVector;
 
-    /** 上次输入姿势朝向 用于姿势突然翻转时继承转向侧 */
-    FVector PreviousInputDirection = FVector::ForwardVector;
-
-    /** 是否已经取得本轮输入姿势 */
+    /** 当前是否存在响应历史 */
     bool bInitialized = false;
 };

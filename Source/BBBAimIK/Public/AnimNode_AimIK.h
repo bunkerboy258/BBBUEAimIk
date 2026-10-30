@@ -52,6 +52,10 @@ struct BBBAIMIK_API FAnimNode_AimIK : public FAnimNode_SkeletalControlBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (DisplayName = "瞄准轴"))
     FVector AimAxis = FVector::ForwardVector;
 
+    /** 瞄准源局部参考上轴 与瞄准轴共同定义左右和上下偏角 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "瞄准", meta = (DisplayName = "瞄准参考上轴", ToolTip = "与瞄准轴共同建立求解前参考系 不得为零或与瞄准轴共线 不受极轴纠偏权重控制"))
+    FVector AimUpAxis = FVector::UpVector;
+
     ////
 
     /** 用于约束身体翻转的局部极轴 */

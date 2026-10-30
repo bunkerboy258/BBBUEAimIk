@@ -79,6 +79,13 @@ void UAnimGraphNode_AimIK::ValidateAnimNodeDuringCompilation(
         return;
     }
 
+    FAimIKReferenceFrame ReferenceFrame;
+    if (!FAimIKReferenceFrame::TryCreate(Node.AimSourceLocalTransform, Node.AimAxis, Node.AimUpAxis, ReferenceFrame))
+    {
+        MessageLog.Error(
+            *LOCTEXT("InvalidAimReferenceFrame", "@@ - 瞄准参考系无效 请检查局部变换 瞄准轴和参考上轴 上轴不得与瞄准轴共线.").ToString());
+    }
+
     const FReferenceSkeleton& ReferenceSkeleton = ForSkeleton->GetReferenceSkeleton();
 
     // 检查瞄准源骨骼是否存在于当前骨架

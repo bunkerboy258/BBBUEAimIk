@@ -20,6 +20,9 @@ struct FAimIKSolverInput
     /** 骨骼链配置 按骨骼层级从根到尖端排列 */
     const TArray<FAimIKBoneRef>& BoneChain;
 
+    /** 本次求解共用的输入瞄准源组件空间参考系 */
+    FAimIKReferenceFrame ReferenceFrameCS;
+
     /** 瞄准源上应指向目标的局部轴 */
     FVector AimAxis = FVector::ForwardVector;
 

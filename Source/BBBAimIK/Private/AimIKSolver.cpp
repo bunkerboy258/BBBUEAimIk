@@ -35,10 +35,8 @@ FVector FAimIKSolver::Solve(
         EffectiveTargetCS);
     const FVector ToClampedTarget = ClampedTargetCS - InitialAimPositionCS;
     const FVector LimitedDirection = FAimIKAngleLimit::ClampDirection(
-        InitialAimForwardCS,
+        Input.ReferenceFrameCS,
         ToClampedTarget,
-        FVector::UpVector,
-        FVector::ForwardVector,
         Input.MaxHorizontalAimCorrectionAngleDegrees,
         Input.MaxVerticalAimCorrectionAngleDegrees,
         Input.AimTargetCS - InitialAimPositionCS);
@@ -153,12 +151,9 @@ FVector FAimIKSolver::GetClampedTargetCS(
     }
 
     // 保持目标距离不变 把瞄准前向按钳制比例摆向目标方向
-    const FQuat TargetRotation = FQuat::FindBetweenNormals(AimForwardCS, ToTargetDirection);
-    const FQuat ClampedRotation = FQuat::Slerp(
-        FQuat::Identity,
-        TargetRotation,
-        ClampMultiplier * TargetClampMultiplier);
-    const FVector ClampedDirection = ClampedRotation.RotateVector(AimForwardCS);
+    const FVector2D TargetAngles = Input.ReferenceFrameCS.ToAngles(ToTargetDirection);
+    const FVector ClampedDirection = Input.ReferenceFrameCS.FromAngles(
+        TargetAngles * static_cast<double>(ClampMultiplier * TargetClampMultiplier));
 
     return AimPositionCS + ClampedDirection * TargetDistance;
 }

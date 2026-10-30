@@ -1,85 +1,66 @@
 #pragma once
 
-#include "CoreMinimal.h"
+#include "AimIKReferenceFrame.h"
 
-/** 分别限制目标相对当前输入姿态的水平与垂直方向 */
+/** 相对同一瞄准源参考系限制修正角度 */
 struct FAimIKAngleLimit final
 {
-    static FVector ClampDirection(
-        const FVector& InputDirection,
-        const FVector& DesiredDirection,
-        const FVector& UpDirection,
-        const FVector& ReferenceForward,
-        float MaxHorizontalAngleDegrees,
-        float MaxVerticalAngleDegrees,
-        const FVector& PreviousDirection)
+    /**
+     * 取得方向表示允许的角度范围
+     * @param HorizontalDegrees	最大水平偏角
+     * @param VerticalDegrees	最大垂直偏角
+     * @return 水平与垂直上限 单位为弧度
+     */
+    static FVector2D GetLimits(float HorizontalDegrees, float VerticalDegrees)
     {
-        const FVector Forward = InputDirection.GetSafeNormal();
-        const FVector Desired = DesiredDirection.GetSafeNormal();
-        const FVector Up = UpDirection.GetSafeNormal();
-        if (Forward.IsNearlyZero() || Desired.IsNearlyZero() || Up.IsNearlyZero())
-        {
-            return Desired;
-        }
+        return FVector2D(
+            FMath::DegreesToRadians(FMath::Clamp(static_cast<double>(HorizontalDegrees), 1.0, 180.0)),
+            FMath::DegreesToRadians(FMath::Clamp(static_cast<double>(VerticalDegrees), 1.0, 90.0)));
+    }
 
-        FVector HorizontalForward = FVector::VectorPlaneProject(Forward, Up).GetSafeNormal();
-        if (HorizontalForward.IsNearlyZero())
+    /**
+     * 选择连续的水平分支并限制到允许范围
+     * @param DesiredYaw	目标水平角
+     * @param PreviousYaw	上一响应在当前参考系中的水平角
+     * @param Limit	水平上限
+     * @return 可用于当前允许区间内插值的水平角
+     */
+    static double ResolveYaw(double DesiredYaw, double PreviousYaw, double Limit)
+    {
+        if (Limit < UE_DOUBLE_PI && FMath::Abs(DesiredYaw) <= Limit)
         {
-            HorizontalForward = FVector::VectorPlaneProject(ReferenceForward, Up).GetSafeNormal();
+            return DesiredYaw;
         }
-        if (HorizontalForward.IsNearlyZero())
+        double Difference = FMath::UnwindRadians(DesiredYaw - PreviousYaw);
+        if (FMath::IsNearlyEqual(FMath::Abs(Difference), UE_DOUBLE_PI, 1.e-8))
         {
-            HorizontalForward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
+            Difference = PreviousYaw < 0.0 ? -UE_DOUBLE_PI : UE_DOUBLE_PI;
         }
-        if (HorizontalForward.IsNearlyZero())
+        const double ContinuousYaw = PreviousYaw + Difference;
+        if (Limit >= UE_DOUBLE_PI)
         {
-            HorizontalForward = FVector::VectorPlaneProject(FVector::RightVector, Up).GetSafeNormal();
+            return ContinuousYaw;
         }
+        return FMath::Clamp(ContinuousYaw, -Limit, Limit);
+    }
 
-        const FVector Right = FVector::CrossProduct(Up, HorizontalForward).GetSafeNormal();
-        if (Right.IsNearlyZero())
-        {
-            return Desired;
-        }
-
-        const float InputPitch = FMath::Asin(FMath::Clamp(FVector::DotProduct(Forward, Up), -1.0f, 1.0f));
-        const float DesiredPitch = FMath::Asin(FMath::Clamp(FVector::DotProduct(Desired, Up), -1.0f, 1.0f));
-        float DesiredYaw = FMath::Atan2(
-            FVector::DotProduct(Desired, Right),
-            FVector::DotProduct(Desired, HorizontalForward));
-        const float MaxHorizontalRadians = FMath::DegreesToRadians(
-            FMath::Clamp(MaxHorizontalAngleDegrees, 1.0f, 180.0f));
-        const float MaxVerticalRadians = FMath::DegreesToRadians(
-            FMath::Clamp(MaxVerticalAngleDegrees, 1.0f, 180.0f));
-        if (FMath::Abs(DesiredYaw) <= MaxHorizontalRadians
-            && FMath::Abs(DesiredPitch - InputPitch) <= MaxVerticalRadians)
-        {
-            return Desired;
-        }
-
-        if (FMath::Abs(DesiredYaw) > MaxHorizontalRadians)
-        {
-            const FVector PreviousHorizontal = FVector::VectorPlaneProject(PreviousDirection, Up).GetSafeNormal();
-            if (!PreviousHorizontal.IsNearlyZero())
-            {
-                const float PreviousYaw = FMath::Atan2(
-                    FVector::DotProduct(PreviousHorizontal, Right),
-                    FVector::DotProduct(PreviousHorizontal, HorizontalForward));
-                const float OtherYaw = DesiredYaw + (DesiredYaw < 0.0f ? 2.0f * UE_PI : -2.0f * UE_PI);
-                if (FMath::Abs(OtherYaw - PreviousYaw) < FMath::Abs(DesiredYaw - PreviousYaw))
-                {
-                    // 跨过正后方时沿用距离上一帧更近的水平转向侧
-                    DesiredYaw = OtherYaw;
-                }
-            }
-        }
-
-        const float LimitedYaw = FMath::Clamp(DesiredYaw, -MaxHorizontalRadians, MaxHorizontalRadians);
-        const float LimitedPitch = FMath::Clamp(
-            DesiredPitch, InputPitch - MaxVerticalRadians, InputPitch + MaxVerticalRadians);
-        const FVector HorizontalDirection = HorizontalForward * FMath::Cos(LimitedYaw)
-            + Right * FMath::Sin(LimitedYaw);
-        return (HorizontalDirection * FMath::Cos(LimitedPitch)
-            + Up * FMath::Sin(LimitedPitch)).GetSafeNormal();
+    /**
+     * 限制目标方向 不建立第二套参考轴
+     * @param Frame	求解前瞄准源参考系
+     * @param DesiredDirection	期望方向
+     * @param HorizontalDegrees	最大水平偏角
+     * @param VerticalDegrees	最大垂直偏角
+     * @param PreviousDirection	选择背后转向分支的历史方向
+     * @return 限制后的单位方向
+     */
+    static FVector ClampDirection(const FAimIKReferenceFrame& Frame, const FVector& DesiredDirection,
+        float HorizontalDegrees, float VerticalDegrees, const FVector& PreviousDirection)
+    {
+        const FVector2D Limits = GetLimits(HorizontalDegrees, VerticalDegrees);
+        const FVector2D Previous = Frame.ToAngles(PreviousDirection);
+        FVector2D Desired = Frame.ToAngles(DesiredDirection, Previous.X);
+        Desired.X = ResolveYaw(Desired.X, Previous.X, Limits.X);
+        Desired.Y = FMath::Clamp(Desired.Y, -Limits.Y, Limits.Y);
+        return Frame.FromAngles(Desired);
     }
 };
