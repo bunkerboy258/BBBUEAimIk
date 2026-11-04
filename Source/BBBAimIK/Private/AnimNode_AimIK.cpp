@@ -308,13 +308,6 @@ void FAnimNode_AimIK::SolveAimIK(
         AimResponse.Reset();
         return;
     }
-    if (bEnableMinTargetDistanceGuard
-        && FVector::Dist(ReferenceFrameCS.Origin, AimTarget) <= MinTargetDistance)
-    {
-        // 目标距离过近时放弃求解 防止目标方向退化
-        AimResponse.Reset();
-        return;
-    }
 
     const FVector AimForwardCS = ReferenceFrameCS.Forward;
     if (AimForwardCS.IsNearlyZero())
@@ -339,7 +332,23 @@ void FAnimNode_AimIK::SolveAimIK(
     SolverInput.ReferenceFrameCS = ReferenceFrameCS;
     SolverInput.AimAxis = AimAxis;
     const FTransform ComponentTransform = Output.AnimInstanceProxy->GetComponentTransform();
-    const FVector TargetDelta = AimTarget - AimTransformCS.GetLocation();
+    FVector TargetDelta = AimTarget - AimTransformCS.GetLocation();
+    if (!ensureMsgf(FMath::IsFinite(MinTargetDistance) && MinTargetDistance >= 0.0f,
+        TEXT("AimIK 最小目标距离必须为有限非负数")))
+    {
+        return;
+    }
+    if (bEnableMinTargetDistanceGuard && MinTargetDistance > UE_SMALL_NUMBER)
+    {
+        const double RawDistance = TargetDelta.Size();
+        if (RawDistance < MinTargetDistance)
+        {
+            // 近处目标连续收敛到输入前向 求解点保持安全距离且不清空追随历史
+            const FVector RawDirection = RawDistance > UE_SMALL_NUMBER ? TargetDelta / RawDistance : ReferenceFrameCS.Forward;
+            const double Proximity = FMath::SmoothStep(0.0, static_cast<double>(MinTargetDistance), RawDistance);
+            TargetDelta = ReferenceFrameCS.FromAngles(ReferenceFrameCS.ToAngles(RawDirection) * Proximity) * MinTargetDistance;
+        }
+    }
     const double TargetDistance = TargetDelta.Size();
     if (!ensureMsgf(FMath::IsFinite(AimFollowSpeed) && AimFollowSpeed > 0.0f
         && FMath::IsFinite(MaxHorizontalAimCorrectionAngleDegrees)
