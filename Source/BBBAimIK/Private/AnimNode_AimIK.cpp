@@ -2,6 +2,7 @@
 
 #include "AimIKBoneHierarchy.h"
 #include "AimIKSolver.h"
+#include "AimIKDebug.h"
 #include "AnimationRuntime.h"
 #include "Animation/AnimInstanceProxy.h"
 #include "ReferenceSkeleton.h"
@@ -374,6 +375,7 @@ void FAnimNode_AimIK::SolveAimIK(
     SolverInput.MaxHorizontalAimCorrectionAngleDegrees = MaxHorizontalAimCorrectionAngleDegrees;
     SolverInput.MaxVerticalAimCorrectionAngleDegrees = MaxVerticalAimCorrectionAngleDegrees;
 
+    const FTransform DebugBefore = AimTransformCS;
     const FVector EffectiveTargetCS = FAimIKSolver::Solve(
         SolverInput,
         WorkingChainTransformsCS,
@@ -393,6 +395,44 @@ void FAnimNode_AimIK::SolveAimIK(
     }
 
     OutBoneTransforms.Sort(FCompareBoneTransformIndex());
+
+    const auto* Mesh = Output.AnimInstanceProxy->GetSkelMeshComponent();
+    if (FAimIKDebug::IsEnabled(Mesh))
+    {
+        FComponentSpacePoseContext Preview(Output);
+        Preview.Pose.CopyPose(Output.Pose);
+        Preview.Pose.LocalBlendCSBoneTransforms(OutBoneTransforms, FMath::Clamp(ActualAlpha, 0.0f, 1.0f));
+        FAimIKDebugFrame Debug;
+        Debug.InputTarget = ComponentTransform.TransformPosition(AimTarget);
+        Debug.FollowTarget = ComponentTransform.TransformPosition(SolverInput.AimTargetCS);
+        Debug.SolveTarget = ComponentTransform.TransformPosition(EffectiveTargetCS);
+        Debug.Before = DebugBefore * ComponentTransform;
+        Debug.Solved = AimTransformCS * ComponentTransform;
+        Debug.Applied = AimSourceLocalTransform * Preview.Pose.GetComponentSpaceTransform(FCompactPoseBoneIndex(AimSourceBoneIndex)) * ComponentTransform;
+        Debug.Axis = AimAxis.GetSafeNormal();
+        Debug.Alpha = ActualAlpha;
+        Debug.Frame = GFrameCounter;
+        const FVector Desired = (Debug.SolveTarget - Debug.Solved.GetLocation()).GetSafeNormal();
+        Debug.ResidualDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(
+            Desired, Debug.Solved.TransformVectorNoScale(Debug.Axis).GetSafeNormal()), -1.0, 1.0)));
+        FAimIKDebug::Publish(Mesh, Debug);
+        auto* Proxy = Output.AnimInstanceProxy;
+        Proxy->AnimDrawDebugDirectionalArrow(Debug.Before.GetLocation(), Debug.Before.GetLocation()
+            + Debug.Before.TransformVectorNoScale(Debug.Axis) * 120, 8, FColor::Silver);
+        Proxy->AnimDrawDebugSphere(Debug.InputTarget, 8, 12, FColor::Green);
+        Proxy->AnimDrawDebugSphere(Debug.FollowTarget, 5, 12, FColor::Cyan);
+        Proxy->AnimDrawDebugSphere(Debug.SolveTarget, 3, 12, FColor::Purple);
+        Proxy->AnimDrawDebugDirectionalArrow(Debug.Solved.GetLocation(), Debug.Solved.GetLocation()
+            + Debug.Solved.TransformVectorNoScale(Debug.Axis) * 150, 8, FColor::Blue);
+        Proxy->AnimDrawDebugDirectionalArrow(Debug.Applied.GetLocation(), Debug.Applied.GetLocation()
+            + Debug.Applied.TransformVectorNoScale(Debug.Axis) * 180, 8, FColor(80, 160, 255));
+        Proxy->AnimDrawDebugInWorldMessage(TEXT("Solved (full strength)"), Debug.Solved.GetLocation()
+            + Debug.Solved.TransformVectorNoScale(Debug.Axis) * 150, FColor::Blue, 0.8f);
+        Proxy->AnimDrawDebugInWorldMessage(TEXT("AppliedAlpha (pre downstream)"), Debug.Applied.GetLocation()
+            + Debug.Applied.TransformVectorNoScale(Debug.Axis) * 180, FColor(80, 160, 255), 0.8f);
+        Proxy->AnimDrawDebugInWorldMessage(FString::Printf(TEXT("AimIK Alpha %.2f Residual %.2fdeg Frame %llu Eval queued"),
+            Debug.Alpha, Debug.ResidualDegrees, Debug.Frame), Debug.Applied.GetLocation() + FVector(0, 0, 20), FColor::Blue, 0.8f);
+    }
 }
 
 //------------------------------------------------------------------------------
